@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:space_invaders/game_state.dart';
+import 'package:space_invaders/models/power_up.dart';
 
 void main() {
   group('GameState Tests', () {
@@ -23,6 +24,34 @@ void main() {
       expect(gameState.level, initialLevel + 1);
       expect(gameState.enemies.isNotEmpty, true);
       expect(gameState.player.isInvulnerable, true);
+    });
+
+    test('Every 5th level spawns a boss enemy', () {
+      final gameState = GameState();
+      // Move to level 5
+      for (int i = 0; i < 4; i++) {
+        gameState.nextLevel();
+      }
+
+      expect(gameState.level, 5);
+      expect(gameState.enemies.length, 1);
+      expect(gameState.enemies.first.isBoss, isTrue);
+    });
+
+    test('Power-ups and timers reset on initLevel', () {
+      final gameState = GameState();
+      gameState.powerUps.addAll([
+        PowerUp(x: 0, y: 0, type: PowerUpType.multiShot),
+      ]);
+      gameState.multiShotTime = 5;
+      gameState.speedBoostTime = 5;
+
+      gameState.initLevel();
+
+      expect(gameState.powerUps, isEmpty);
+      expect(gameState.multiShotTime, 0);
+      expect(gameState.speedBoostTime, 0);
+      expect(gameState.player.speed, 5);
     });
 
     test('Player invulnerability updates correctly', () {

@@ -1,0 +1,18 @@
+# .clinerules
+# This file contains rules for the CLI tool.
+
+# Example rule: Disable command if not in project directory
+disable_if_not_in_project_directory = true
+
+# Example rule: Enable verbose logging
+enable_verbose_logging = false
+
+# Add more rules as needed
+1. Нельзя использовать внешние библиотеки, npm, CDN и т.д.
+2. Всегда отвечай на русском языке
+3. Используй только современный синтаксис языка JavaScript, ES6+, Class, requestAnimationFrame, canvas, HTML и CSS
+4. Нельзя отдавать непротестированный агентом код пользователю. Сначала ты должен полностью протестировать код
+5. Выполнять всегда строго то, что просит пользователь
+6. Открывать самостоятельно файл index.html нельзя. Для этого надо сначала спросить подтверждение на открытие этого файла
+7. Твоя роль: Senior JavaScript Game Developer.
+8. Пишем на Flutter/Dart с CI/CD Codemagic.io и Selenium, а также Shorebird, Shorebird CLI. 

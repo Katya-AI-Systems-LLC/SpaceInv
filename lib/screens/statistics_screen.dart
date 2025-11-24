@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/statistics_service.dart';
+import '../services/localization_service.dart';
 
 class StatisticsScreen extends StatefulWidget {
   const StatisticsScreen({super.key});
@@ -55,10 +56,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = LocalizationService();
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Statistics'),
+        title: Text(loc.t('title_statistics')),
         backgroundColor: Colors.indigo.shade900,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),

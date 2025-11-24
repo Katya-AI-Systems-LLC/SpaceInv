@@ -203,12 +203,19 @@ function fireBullet() {
     bullets.push({ x: player.x + player.width / 2 - 1.5, y: player.y });
 }
 
-function gameLoop() {
-    if (!gameOver) {
+function gameLoop(currentTime) {
+    if (!gameOver && !paused) {
+        // Calculate delta time for smooth animation
+        if (lastTime === 0) {
+            lastTime = currentTime;
+        }
+        deltaTime = (currentTime - lastTime) / 16.67; // Normalize to 60fps
+        lastTime = currentTime;
+        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         updatePlayer();
-        updateEnemies();
+        updateEnemies(deltaTime);
         updateBullets();
         updateParticles();
         checkCollisions();
@@ -220,7 +227,21 @@ function gameLoop() {
         drawParticles();
         drawUI();
     } else {
-        drawUI();
+        if (!gameOver) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawPlayer();
+            drawEnemies();
+            drawBullets();
+            drawParticles();
+            drawUI();
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '24px Arial';
+            ctx.fillText('PAUSED', canvas.width / 2 - 50, canvas.height / 2);
+        } else {
+            drawUI();
+        }
     }
 }
 
@@ -229,10 +250,18 @@ document.addEventListener('keydown', (e) => {
     keys[e.key] = true;
     if (e.key === ' ') {
         e.preventDefault();
-        fireBullet();
+        if (!gameOver && !paused) {
+            fireBullet();
+        }
     }
     if (e.key === 'r' && gameOver) {
         restartGame();
+    }
+    if (e.key === 'p' || e.key === 'P') {
+        paused = !paused;
+        if (!paused) {
+            lastTime = 0; // Reset time tracking when resuming
+        }
     }
 });
 
@@ -259,14 +288,28 @@ canvas.addEventListener('touchmove', (e) => {
 
 function restartGame() {
     player.x = 175;
+    player.y = 550;
     player.lives = 3;
+    player.shield = false;
+    player.shieldTime = 0;
+    player.tripleShot = false;
+    player.tripleShotTime = 0;
     score = 0;
     level = 1;
     enemySpeed = 1;
     gameOver = false;
+    paused = false;
     bullets = [];
     particles = [];
+    powerUps = [];
+    lastTime = 0;
     initEnemies();
+    
+    // Update high score if needed
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('spaceInvadersHighScore', highScore);
+    }
 }
 
 // Initialize canvas size
@@ -282,19 +325,23 @@ function resizeCanvas() {
 
 // Setup canvas
 if (canvas) {
+    // Set initial canvas size if not set
+    if (canvas.width === 0 || canvas.height === 0) {
+        canvas.width = 400;
+        canvas.height = 600;
+    }
+    
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
     
     // Initialize and start game
     initEnemies();
-    requestAnimationFrame(function gameLoopRAF() {
-        gameLoop();
-        if (!gameOver) {
-            requestAnimationFrame(gameLoopRAF);
-        }
+    requestAnimationFrame(function gameLoopRAF(currentTime) {
+        gameLoop(currentTime);
+        requestAnimationFrame(gameLoopRAF);
     });
 } else {
-    console.error('Canvas element not found!');
+    console.error('Canvas element not found! Make sure you have <canvas id="gameCanvas"></canvas> in your HTML.');
 }
 
 // Use requestAnimationFrame instead of setInterval for better performance

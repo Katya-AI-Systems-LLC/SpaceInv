@@ -1,4 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:meta/meta.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AudioService {
@@ -6,8 +7,8 @@ class AudioService {
   factory AudioService() => _instance;
   AudioService._internal();
 
-  final AudioPlayer _backgroundPlayer = AudioPlayer();
-  final AudioPlayer _soundEffectPlayer = AudioPlayer();
+  AudioPlayer _backgroundPlayer = AudioPlayer();
+  AudioPlayer _soundEffectPlayer = AudioPlayer();
   
   bool _soundEnabled = true;
   bool _musicEnabled = true;
@@ -18,6 +19,23 @@ class AudioService {
   bool get musicEnabled => _musicEnabled;
   double get soundVolume => _soundVolume;
   double get musicVolume => _musicVolume;
+
+  @visibleForTesting
+  void configureAudioPlayersForTesting({
+    AudioPlayer? backgroundPlayer,
+    AudioPlayer? soundEffectPlayer,
+  }) {
+    _backgroundPlayer = backgroundPlayer ?? _backgroundPlayer;
+    _soundEffectPlayer = soundEffectPlayer ?? _soundEffectPlayer;
+  }
+
+  @visibleForTesting
+  void resetForTesting() {
+    _soundEnabled = true;
+    _musicEnabled = true;
+    _soundVolume = 1.0;
+    _musicVolume = 0.5;
+  }
 
   Future<void> initialize() async {
     await _loadSettings();
@@ -52,8 +70,8 @@ class AudioService {
     try {
       await _backgroundPlayer.setReleaseMode(ReleaseMode.loop);
       await _backgroundPlayer.setVolume(_musicVolume);
-      // Note: Add background.mp3 to assets/sounds/ to enable
-      // await _backgroundPlayer.play(AssetSource('sounds/background.mp3'));
+      // Try to play background music if available
+      await _backgroundPlayer.play(AssetSource('sounds/background.mp3'));
     } catch (e) {
       // Background music file not found, skip silently
     }
@@ -77,8 +95,13 @@ class AudioService {
     if (!_soundEnabled) return;
     try {
       await _soundEffectPlayer.setVolume(_soundVolume);
-      // Reuse shoot sound for explosion if explosion sound not available
-      await _soundEffectPlayer.play(AssetSource('sounds/shoot.wav'));
+      // Try to play explosion sound, fallback to shoot sound if not available
+      try {
+        await _soundEffectPlayer.play(AssetSource('sounds/explosion.wav'));
+      } catch (e) {
+        // Fallback to shoot sound if explosion sound not available
+        await _soundEffectPlayer.play(AssetSource('sounds/shoot.wav'));
+      }
     } catch (e) {
       // Sound file not found, skip silently
     }

@@ -17,13 +17,17 @@ A Flutter implementation of the classic Space Invaders arcade game with modern i
 - ✅ **Level progression** - Enemies increase with each level
 - ✅ **Enemy bullets** - Enemies can shoot back
 - ✅ **Particle effects** - Explosions when enemies are destroyed
-- ✅ **Invulnerability** - Temporary shield after taking damage
+- ✅ **Invulnerability** - Temporary shield and animated aura after taking damage
 - ✅ **Pause functionality** - Press P or ESC to pause
-- ✅ **High score tracking** - Saves best score locally
-- ✅ **Game over screen** - Shows stats and allows restart
-- ✅ **Start menu** - Beautiful menu screen with controls
-- ✅ **Visual effects** - Starfield background, particle explosions
-- ✅ **Multiple enemy types** - Different colors and behaviors
+- ✅ **High score tracking & local leaderboard** - Saves best scores locally
+- ✅ **Game over screen** - Shows stats, achievements update and allows restart
+- ✅ **Start menu** - Beautiful menu screen with controls and mode selection
+- ✅ **Visual effects** - Starfield background, particle explosions, animated enemies
+- ✅ **Multiple enemy types** - Normal, fast, strong and kamikaze divers
+- ✅ **Boss levels** - Strong bosses every few levels with second attack phase
+- ✅ **Power-ups** - Multi-shot, shield, speed boost, extra life
+- ✅ **Achievements** - Local achievements based on StatisticsService
+- ✅ **Game modes** - Classic, Survival, Hardcore
 
 ## Controls
 
@@ -47,22 +51,38 @@ A Flutter implementation of the classic Space Invaders arcade game with modern i
 - **Level Progression**: Each level adds more enemies and increases difficulty
 - **Enemy Shooting**: Enemies periodically shoot bullets at the player
 
-## Project Structure
+## Project Structure (simplified)
 
 ```
 lib/
-├── main.dart                 # App entry point
-├── game_state.dart           # Game state management
-├── collision_detection.dart  # Collision logic
-├── enemy_movement.dart       # Enemy movement controller
+├── main.dart                        # App entry point
+├── game_state.dart                  # Game state management
+├── collision_detection.dart         # Collision logic
+├── enemy_movement.dart              # Enemy movement controller
+├── models/
+│   ├── power_up.dart                # Power-up model
+│   └── game_mode.dart               # Game mode enum
+├── services/
+│   ├── audio_service.dart           # Audio system
+│   ├── statistics_service.dart      # Statistics tracking
+│   ├── achievements_service.dart    # Achievements system
+│   ├── leaderboard_service.dart     # Local (and optional online) leaderboard
+│   ├── online_leaderboard_client.dart # Online leaderboard abstraction
+│   └── localization_service.dart    # Simple RU/EN localization
 ├── screens/
-│   ├── start_menu_screen.dart
-│   ├── game_screen.dart
-│   └── game_over_screen.dart
+│   ├── start_menu_screen.dart       # Start menu with modes & navigation
+│   ├── game_screen.dart             # Main game screen
+│   ├── game_over_screen.dart        # Game over summary
+│   ├── statistics_screen.dart       # Statistics UI
+│   ├── achievements_screen.dart     # Achievements UI
+│   ├── leaderboard_screen.dart      # Local leaderboard UI
+│   └── settings_screen.dart         # Audio & language settings
 └── widgets/
     ├── player.dart
     ├── enemy.dart
-    └── bullet.dart
+    ├── bullet.dart
+    ├── power_up.dart
+    └── barrier.dart
 ```
 
 ## Assets
@@ -101,8 +121,9 @@ The game uses fallback colored widgets if image assets are not found. To add cus
 
 ## Dependencies
 
-- `shared_preferences: ^2.2.2` - For saving high scores and settings
+- `shared_preferences: ^2.2.2` - For saving high scores, stats and settings
 - `audioplayers: ^5.2.1` - For sound effects and background music
+- `http: ^1.2.0` - For optional online leaderboard REST client
 
 ## Features Beyond Core Plan
 
@@ -126,7 +147,7 @@ The game uses fallback colored widgets if image assets are not found. To add cus
 - Volume sliders for fine-tuning
 - Settings persistence across sessions
 
-### 🎁 Power-ups System (Ready for Integration)
+### 🎁 Power-ups System
 - Multi-shot power-up
 - Shield power-up
 - Speed boost power-up
@@ -140,16 +161,44 @@ The project also includes a separate web version implementation in the `web/` di
 - Power-ups system
 - Enhanced UI
 
-## Future Enhancements
+## Online Leaderboard (API Hooks)
 
-Potential improvements:
-- Sound effects integration
-- Background music
-- Power-ups (multi-shot, shield, etc.)
-- Boss enemies
-- Leaderboard
-- Achievement system
-- Different difficulty modes
+The app includes a pluggable online leaderboard client.
+
+- Local leaderboard always works offline via `SharedPreferences`.
+- Online sync is **disabled by default**.
+- To enable it, provide a backend and configure:
+
+```bash
+flutter run \
+  --dart-define=LEADERBOARD_API_BASE_URL=https://your.api \
+  --dart-define=LEADERBOARD_API_KEY=optional_key
+```
+
+The backend is expected to expose:
+
+- `GET  /leaderboard` – returns a JSON array or `{ "entries": [...] }`
+- `POST /leaderboard` – accepts a single leaderboard entry JSON
+
+Entry JSON format matches `LeaderboardEntry.toJson()`:
+
+```json
+{
+  "score": 1234,
+  "level": 7,
+  "mode": "GameMode.classic",
+  "date": "2025-01-01T12:00:00.000Z"
+}
+```
+
+You are free to implement this backend using any technology (Firebase, REST, etc.).
+
+## Additional Documentation
+
+- `docs/ARCHITECTURE.md` – detailed overview of the current game architecture and how systems (campaign, meta‑progression, AI hooks) fit together.
+- `docs/PLATFORM_SUPPORT.md` – platform matrix for Android/iOS/Web/Windows/macOS/Linux and notes on experimental targets (UWP, Aurora‑like systems).
+- `docs/AI_QUANTUM_ENGINE.md` – forward‑looking design for integrating external AI agents, services, and optional web3/blockchain bridges with the game.
+- `docs/GIT_SYSTEMS.md` – notes on using this repository across multiple git forges (GitHub/GitLab/etc. and domestic platforms via `git_systems/`).
 
 ## License
 

@@ -36,10 +36,15 @@ dependencies:
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.2
   audioplayers: ^5.2.1
+  meta: ^1.15.0
+  http: ^1.2.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
+  mocktail: ^1.0.3
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/audio_service.dart';
+import '../services/localization_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -15,6 +16,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _musicEnabled = true;
   double _soundVolume = 1.0;
   double _musicVolume = 0.5;
+  String _languageCode = 'en';
 
   @override
   void initState() {
@@ -28,15 +30,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _musicEnabled = _audioService.musicEnabled;
       _soundVolume = _audioService.soundVolume;
       _musicVolume = _audioService.musicVolume;
+      _languageCode = LocalizationService().languageCode;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    final loc = LocalizationService();
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(loc.t('title_settings')),
         backgroundColor: Colors.indigo.shade900,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -158,6 +162,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
             
             const SizedBox(height: 20),
             
+            // Language Section
+            Card(
+              color: Colors.black54,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Language',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildLanguageOption('en', 'English'),
+                    _buildLanguageOption('ru', 'Русский'),
+                  ],
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
+            
             // Game Info Section
             Card(
               color: Colors.black54,
@@ -206,6 +236,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildLanguageOption(String code, String label) {
+    return ListTile(
+      leading: Radio<String>(
+        value: code,
+        groupValue: _languageCode,
+        onChanged: (value) {
+          if (value != null) {
+            _setLanguage(value);
+          }
+        },
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(color: Colors.white70),
+      ),
+      onTap: () => _setLanguage(code),
+    );
+  }
+
+  void _setLanguage(String code) {
+    LocalizationService().setLanguage(code);
+    setState(() {
+      _languageCode = code;
+    });
   }
 }
 
