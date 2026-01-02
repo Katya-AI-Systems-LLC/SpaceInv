@@ -2,6 +2,10 @@
 
 A Flutter implementation of the classic Space Invaders arcade game with modern improvements and features.
 
+https://api.codemagic.io/apps/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/status_badge.svg
+
+[![Codemagic build status](https://api.codemagic.io/apps/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/status_badge.svg)](https://codemagic.io/app/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/latest_build)
+
 ## Features
 
 ### Core Gameplay
