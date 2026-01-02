@@ -1,0 +1,17 @@
+image: python:3.8
+
+pipelines:
+  default:
+    - step:
+        name: Test and Build
+        script:
+          - apt-get update
+          - apt-get install -y curl unzip
+          - curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.10.0-stable.tar.xz | tar -xJ -C /opt
+          - export PATH="$PATH:/opt/flutter/bin"
+          - flutter doctor
+          - flutter pub get
+          - flutter test
+          - flutter build web --release
+        artifacts:
+          - build/web/**

@@ -1,0 +1,21 @@
+stages:
+  - build
+
+variables:
+  FLUTTER_VERSION: "3.10.0"
+
+before_script:
+  - apt update
+  - apt install -y curl unzip
+  - curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz | tar -xJ -C /opt
+  - export PATH="$PATH:/opt/flutter/bin"
+  - flutter doctor
+  - flutter pub get
+
+build_android:
+  stage: build
+  script:
+    - flutter build apk --release
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk

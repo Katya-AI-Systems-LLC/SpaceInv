@@ -1,0 +1,23 @@
+# GitLab-specific gitattributes configuration for Space Invaders
+
+# Normalize line endings for all text files
+* text=auto
+
+# Specific file type handling
+*.md text eol=lf
+*.dart text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.plist text eol=lf
+*.sh text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.mp3 binary

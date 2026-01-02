@@ -1,0 +1,35 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: JavaToolInstaller@0
+  inputs:
+    versionSpec: '11'
+    jdkArchitectureOption: 'x64'
+    jdkSourceOption: 'PreInstalled'
+
+- task: FlutterInstall@0
+  inputs:
+    mode: 'auto'
+    autoDetectVersion: 'latest'
+
+- script: |
+    flutter pub get
+  displayName: 'Get dependencies'
+
+- script: |
+    flutter test
+  displayName: 'Run tests'
+
+- script: |
+    flutter build web --release
+  displayName: 'Build web'
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: 'build/web'
+    ArtifactName: 'web-build'
+    publishLocation: 'Container'

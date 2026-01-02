@@ -1,0 +1,20 @@
+image: python:3.8
+
+steps:
+  - name: Test and Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Flutter
+        run: |
+          apt update
+          apt install -y curl unzip
+          curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.10.0-stable.tar.xz | tar -xJ -C /opt
+          export PATH="$PATH:/opt/flutter/bin"
+          flutter doctor
+      - name: Get dependencies
+        run: flutter pub get
+      - name: Run tests
+        run: flutter test
+      - name: Build web
+        run: flutter build web --release

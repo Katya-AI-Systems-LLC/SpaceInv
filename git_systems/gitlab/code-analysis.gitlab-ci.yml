@@ -1,0 +1,18 @@
+stages:
+  - analysis
+
+variables:
+  FLUTTER_VERSION: "3.10.0"
+
+before_script:
+  - apt update
+  - apt install -y curl unzip
+  - curl -L https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz | tar -xJ -C /opt
+  - export PATH="$PATH:/opt/flutter/bin"
+  - flutter doctor
+  - flutter pub get
+
+code_analysis:
+  stage: analysis
+  script:
+    - flutter analyze
