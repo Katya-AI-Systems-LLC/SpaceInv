@@ -138,7 +138,7 @@ def create_platform_icons():
             ('macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_1024.png', 1024),
         ],
         'linux': [
-            ('linux/snap/gui/space_invaders.png', 256),
+            ('linux/snap/gui/Space Invaders.png', 256),
         ],
     }
     
