@@ -4,6 +4,9 @@ import 'models/power_up.dart';
 import 'models/game_mode.dart';
 import 'models/barrier.dart';
 import 'models/run_modifier.dart';
+import 'models/weapon.dart';
+import 'models/advanced_enemy.dart';
+import 'models/environmental_hazard.dart';
 import 'services/upgrades_service.dart';
 import 'models/upgrade_type.dart';
 
@@ -16,6 +19,52 @@ class Player {
   int lives = 3;
   bool isInvulnerable = false;
   double invulnerableTime = 0;
+  Weapon currentWeapon = Weapon.basic();
+  List<SpecialAbilityState> specialAbilities = [];
+  int weaponEnergy = 100;
+  double lastFireTime = 0;
+  double fireRate = 0.2;
+  
+  Player() {
+    // Initialize special abilities
+    specialAbilities = [
+      SpecialAbilityState(type: SpecialAbility.timeSlow, maxCooldown: 45),
+      SpecialAbilityState(type: SpecialAbility.screenClear, maxCooldown: 60),
+      SpecialAbilityState(type: SpecialAbility.megaShield, maxCooldown: 30),
+      SpecialAbilityState(type: SpecialAbility.rapidFire, maxCooldown: 25),
+    ];
+  }
+  
+  void updateWeapon(double deltaTime) {
+    if (weaponEnergy < 100) {
+      weaponEnergy += (deltaTime * 5).round(); // Regenerate energy
+      weaponEnergy = weaponEnergy.clamp(0, 100);
+    }
+  }
+  
+  void updateSpecialAbilities(double deltaTime) {
+    for (var ability in specialAbilities) {
+      ability.update(deltaTime);
+    }
+  }
+  
+  bool canFire() {
+    return (DateTime.now().millisecondsSinceEpoch / 1000.0) - lastFireTime >= fireRate;
+  }
+  
+  void fire() {
+    lastFireTime = DateTime.now().millisecondsSinceEpoch / 1000.0;
+  }
+  
+  void useSpecialAbility(SpecialAbility type) {
+    final ability = specialAbilities.firstWhere((a) => a.type == type);
+    ability.activate();
+  }
+  
+  void changeWeapon(Weapon newWeapon) {
+    currentWeapon = newWeapon;
+    fireRate = 0.2 / newWeapon.fireRate;
+  }
   
   void updateInvulnerability(double deltaTime) {
     if (isInvulnerable) {
@@ -104,11 +153,14 @@ class Particle {
 class GameState {
   Player player = Player();
   List<Enemy> enemies = [];
+  List<AdvancedEnemy> advancedEnemies = [];
   List<Bullet> bullets = [];
   List<Bullet> enemyBullets = [];
   List<Particle> particles = [];
   List<PowerUp> powerUps = [];
   List<Barrier> barriers = [];
+  List<EnvironmentalHazard> hazards = [];
+  HazardManager hazardManager = HazardManager();
   int score = 0;
   int level = 1;
   bool gameOver = false;
@@ -126,6 +178,28 @@ class GameState {
   int comboCount = 0;
   double comboTimeRemaining = 0;
   int comboMultiplier = 1;
+  
+  // Dynamic difficulty
+  double difficultyMultiplier = 1.0;
+  int playerPerformanceScore = 0;
+  double lastDifficultyAdjust = 0;
+  
+  // Special effects
+  bool timeSlowed = false;
+  double timeSlowDuration = 0;
+  double screenShakeIntensity = 0;
+  double screenShakeDuration = 0;
+  
+  // Weapon system
+  List<Weapon> availableWeapons = [
+    Weapon.basic(),
+    Weapon.spread(),
+    Weapon.laser(),
+    Weapon.plasma(),
+    Weapon.rocket(),
+    Weapon.wave(),
+  ];
+  int currentWeaponIndex = 0;
 
   bool get hasMultiShot => multiShotTime > 0;
   bool get hasSpeedBoost => speedBoostTime > 0;
@@ -146,11 +220,14 @@ class GameState {
   
   void initLevel() {
     enemies.clear();
+    advancedEnemies.clear();
     bullets.clear();
     enemyBullets.clear();
     particles.clear();
     powerUps.clear();
     barriers.clear();
+    hazards.clear();
+    hazardManager.clear();
     multiShotTime = 0;
     speedBoostTime = 0;
     player.speed = 5;
@@ -253,6 +330,48 @@ class GameState {
           )..speed = baseSpeed);
         }
       }
+      
+      // Add advanced enemies based on level
+      if (level >= 3) {
+        _addAdvancedEnemies();
+      }
+    }
+  }
+  
+  void _addAdvancedEnemies() {
+    final advancedCount = math.min(level ~/ 2, 5);
+    for (int i = 0; i < advancedCount; i++) {
+      final types = AdvancedEnemyType.values;
+      final type = types[_random.nextInt(types.length)];
+      final x = _random.nextDouble() * 300 + 50;
+      final y = _random.nextDouble() * 100 + 50;
+      
+      switch (type) {
+        case AdvancedEnemyType.sniper:
+          advancedEnemies.add(AdvancedEnemy.sniper(x, y));
+          break;
+        case AdvancedEnemyType.tank:
+          advancedEnemies.add(AdvancedEnemy.tank(x, y));
+          break;
+        case AdvancedEnemyType.healer:
+          advancedEnemies.add(AdvancedEnemy.healer(x, y));
+          break;
+        case AdvancedEnemyType.spawner:
+          advancedEnemies.add(AdvancedEnemy.spawner(x, y));
+          break;
+        case AdvancedEnemyType.phantom:
+          advancedEnemies.add(AdvancedEnemy.phantom(x, y));
+          break;
+        case AdvancedEnemyType.morphing:
+          advancedEnemies.add(AdvancedEnemy.morphing(x, y));
+          break;
+        case AdvancedEnemyType.shielded:
+          advancedEnemies.add(AdvancedEnemy.shielded(x, y));
+          break;
+        case AdvancedEnemyType.teleporter:
+          advancedEnemies.add(AdvancedEnemy.teleporter(x, y));
+          break;
+      }
     }
   }
   
@@ -272,6 +391,98 @@ class GameState {
         comboMultiplier = 1;
         comboCount = 0;
       }
+    }
+  }
+  
+  void updateDynamicDifficulty(double deltaTime) {
+    lastDifficultyAdjust += deltaTime;
+    
+    // Adjust difficulty every 10 seconds
+    if (lastDifficultyAdjust >= 10.0) {
+      lastDifficultyAdjust = 0;
+      
+      // Calculate performance score
+      double hitRate = enemiesKilled > 0 ? (enemiesKilled / (enemiesKilled + player.lives * 10)) : 0;
+      double scoreRate = score / (gameTime + 1);
+      
+      playerPerformanceScore = (hitRate * 50 + scoreRate * 0.1).round();
+      
+      // Adjust difficulty based on performance
+      if (playerPerformanceScore > 70) {
+        difficultyMultiplier = math.min(difficultyMultiplier + 0.1, 2.0);
+      } else if (playerPerformanceScore < 30) {
+        difficultyMultiplier = math.max(difficultyMultiplier - 0.1, 0.5);
+      }
+    }
+  }
+  
+  void updateSpecialEffects(double deltaTime) {
+    // Update time slow
+    if (timeSlowed && timeSlowDuration > 0) {
+      timeSlowDuration -= deltaTime;
+      if (timeSlowDuration <= 0) {
+        timeSlowed = false;
+        timeSlowDuration = 0;
+      }
+    }
+    
+    // Update screen shake
+    if (screenShakeDuration > 0) {
+      screenShakeDuration -= deltaTime;
+      if (screenShakeDuration <= 0) {
+        screenShakeDuration = 0;
+        screenShakeIntensity = 0;
+      }
+    }
+  }
+  
+  void addScreenShake(double intensity, double duration) {
+    screenShakeIntensity = math.max(screenShakeIntensity, intensity);
+    screenShakeDuration = math.max(screenShakeDuration, duration);
+  }
+  
+  void activateTimeSlow(double duration) {
+    timeSlowed = true;
+    timeSlowDuration = duration;
+  }
+  
+  void switchWeapon(int direction) {
+    currentWeaponIndex = (currentWeaponIndex + direction) % availableWeapons.length;
+    if (currentWeaponIndex < 0) currentWeaponIndex = availableWeapons.length - 1;
+    player.changeWeapon(availableWeapons[currentWeaponIndex]);
+  }
+  
+  void clearScreen() {
+    // Destroy all regular enemies
+    for (var enemy in enemies) {
+      enemy.alive = false;
+      score += 10;
+      enemiesKilled++;
+    }
+    
+    // Destroy all advanced enemies
+    for (var enemy in advancedEnemies) {
+      enemy.alive = false;
+      score += enemy.points;
+      enemiesKilled++;
+    }
+    
+    // Clear enemy bullets
+    enemyBullets.clear();
+    
+    // Add screen effects
+    addScreenShake(15, 0.5);
+    
+    // Create explosion particles
+    for (int i = 0; i < 50; i++) {
+      particles.add(Particle(
+        x: _random.nextDouble() * 400,
+        y: _random.nextDouble() * 300,
+        vx: (_random.nextDouble() - 0.5) * 10,
+        vy: (_random.nextDouble() - 0.5) * 10,
+        life: 60,
+        size: _random.nextDouble() * 5 + 2,
+      ));
     }
   }
 }

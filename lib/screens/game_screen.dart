@@ -7,6 +7,9 @@ import '../widgets/enemy.dart';
 import '../widgets/bullet.dart';
 import '../widgets/power_up.dart';
 import '../widgets/barrier.dart';
+import '../widgets/advanced_enemy.dart';
+import '../widgets/environmental_hazard.dart';
+import '../widgets/weapon.dart';
 import '../game_state.dart';
 import '../collision_detection.dart';
 import '../enemy_movement.dart';
@@ -15,6 +18,9 @@ import '../models/power_up.dart';
 import '../models/game_mode.dart';
 import '../models/run_modifier.dart';
 import '../models/upgrade_type.dart';
+import '../models/weapon.dart';
+import '../models/advanced_enemy.dart';
+import '../models/environmental_hazard.dart';
 import '../services/audio_service.dart';
 import '../services/upgrades_service.dart';
 import '../services/localization_service.dart';
@@ -90,38 +96,43 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     final deltaTime = (now.difference(_lastUpdateTime).inMilliseconds) / 1000.0;
     _lastUpdateTime = now;
     
+    // Apply time slow effect
+    final adjustedDeltaTime = gameState.timeSlowed ? deltaTime * 0.3 : deltaTime;
+    
     setState(() {
       gameState.gameTime += deltaTime;
-      if (_shakeTime > 0) {
-        _shakeTime -= deltaTime;
-        if (_shakeTime < 0) _shakeTime = 0;
-      }
-      if (_bossIntroTime > 0) {
-        _bossIntroTime -= deltaTime;
-        if (_bossIntroTime < 0) _bossIntroTime = 0;
-      }
-      if (_powerUpBannerTime > 0) {
-        _powerUpBannerTime -= deltaTime;
-        if (_powerUpBannerTime < 0) _powerUpBannerTime = 0;
-      }
-      if (_comboBannerTime > 0) {
-        _comboBannerTime -= deltaTime;
-        if (_comboBannerTime < 0) _comboBannerTime = 0;
-      }
       
-      // Update player invulnerability
+      // Update special effects
+      gameState.updateSpecialEffects(deltaTime);
+      gameState.updateDynamicDifficulty(deltaTime);
+      
+      // Update player systems
+      gameState.player.updateWeapon(deltaTime);
+      gameState.player.updateSpecialAbilities(deltaTime);
       gameState.player.updateInvulnerability(deltaTime);
       gameState.updateCombo(deltaTime);
       _updatePowerUpTimers(deltaTime);
       
-      // Update enemy positions
+      // Update environmental hazards
       final screenWidth = MediaQuery.of(context).size.width;
+      final screenHeight = MediaQuery.of(context).size.height;
+      gameState.hazardManager.update(adjustedDeltaTime, screenWidth, screenHeight, gameState.level);
+      
+      // Update enemy positions
       if (gameState.enemies.isNotEmpty) {
         enemyController.updateEnemyMovement(
           gameState.enemies,
           screenWidth,
           gameState.mode,
         );
+      }
+      
+      // Update advanced enemies
+      for (var enemy in gameState.advancedEnemies) {
+        enemy.update(adjustedDeltaTime, screenWidth, screenHeight);
+        if (enemy.canUseAbility()) {
+          _handleAdvancedEnemyAbility(enemy);
+        }
       }
       
       // Update player bullets
@@ -134,8 +145,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       for (var bullet in gameState.enemyBullets) {
         bullet.move();
       }
-      final screenHeight = MediaQuery.of(context).size.height;
       gameState.enemyBullets.removeWhere((bullet) => bullet.y > screenHeight);
+      
+      // Update power-ups
       _updatePowerUps(screenHeight);
       
       // Update particles
@@ -145,7 +157,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       gameState.particles.removeWhere((particle) => particle.life <= 0);
       
       // Enemy shooting
-      _lastEnemyShootTime += deltaTime;
+      _lastEnemyShootTime += adjustedDeltaTime;
       double interval = 2.0 - (gameState.level * 0.1);
       if (gameState.mode == GameMode.survival) {
         interval -= 0.2;
@@ -160,6 +172,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         }
       }
       interval = interval.clamp(0.4, 3.0);
+      interval /= gameState.difficultyMultiplier;
 
       if (_lastEnemyShootTime > interval && gameState.enemies.isNotEmpty) {
         _shootEnemyBullet();
@@ -174,7 +187,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       );
       
       // Check level complete
-      if (gameState.enemies.isEmpty && !gameState.gameOver) {
+      if (gameState.enemies.isEmpty && gameState.advancedEnemies.isEmpty && !gameState.gameOver) {
         final nextLevel = gameState.level + 1;
         final willHaveBoss =
             (gameState.mode == GameMode.classic && nextLevel % 5 == 0) ||
@@ -203,6 +216,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         gameState.player.lives--;
         gameState.player.isInvulnerable = true;
         gameState.player.invulnerableTime = 2.0;
+        gameState.addScreenShake(10, 0.35);
         if (gameState.player.lives <= 0) {
           gameState.gameOver = true;
           _showGameOverScreen();
@@ -287,15 +301,42 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
   void _fireBullet() {
     if (gameState.isPaused || gameState.gameOver || gameState.gameWon) return;
+    if (!gameState.player.canFire()) return;
     
     setState(() {
+      final weapon = gameState.player.currentWeapon;
       final baseX = gameState.player.x + gameState.player.width / 2 - 2.5;
-      gameState.bullets.add(_createPlayerBullet(baseX));
-
-      if (gameState.hasMultiShot) {
-        gameState.bullets.add(_createPlayerBullet(baseX - 14));
-        gameState.bullets.add(_createPlayerBullet(baseX + 14));
+      
+      switch (weapon.type) {
+        case WeaponType.basic:
+          gameState.bullets.add(_createPlayerBullet(baseX));
+          break;
+          
+        case WeaponType.spread:
+          gameState.bullets.add(_createPlayerBullet(baseX));
+          gameState.bullets.add(_createPlayerBullet(baseX - 15));
+          gameState.bullets.add(_createPlayerBullet(baseX + 15));
+          break;
+          
+        case WeaponType.laser:
+          gameState.bullets.add(_createPlayerBullet(baseX));
+          break;
+          
+        case WeaponType.plasma:
+          gameState.bullets.add(_createPlayerBullet(baseX - 8));
+          gameState.bullets.add(_createPlayerBullet(baseX + 8));
+          break;
+          
+        case WeaponType.rocket:
+          gameState.bullets.add(_createPlayerBullet(baseX));
+          break;
+          
+        case WeaponType.wave:
+          gameState.bullets.add(_createPlayerBullet(baseX));
+          break;
       }
+      
+      gameState.player.fire();
     });
     _audioService.playShootSound();
   }
@@ -365,6 +406,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _powerUpBannerTime = 1.5;
     final loc = LocalizationService();
     String baseLabel;
+    
     switch (powerUp.type) {
       case PowerUpType.multiShot:
         gameState.multiShotTime = 8;
@@ -389,6 +431,58 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         gameState.player.lives = (gameState.player.lives + 1).clamp(0, 5);
         _powerUpBannerIcon = Icons.favorite;
         baseLabel = loc.t('powerup_extra_life');
+        break;
+      case PowerUpType.weaponUpgrade:
+        // Upgrade current weapon or switch to next one
+        final currentIndex = gameState.currentWeaponIndex;
+        if (currentIndex < gameState.availableWeapons.length - 1) {
+          gameState.switchWeapon(1);
+        } else {
+          // Upgrade current weapon stats
+          final currentWeapon = gameState.player.currentWeapon;
+          final upgradedWeapon = currentWeapon.copyWith(
+            damage: currentWeapon.damage * 1.2,
+            fireRate: currentWeapon.fireRate * 1.1,
+          );
+          gameState.player.changeWeapon(upgradedWeapon);
+        }
+        _powerUpBannerIcon = Icons.upgrade;
+        baseLabel = 'Weapon Upgraded!';
+        break;
+      case PowerUpType.energyBoost:
+        gameState.player.weaponEnergy = 100;
+        _powerUpBannerIcon = Icons.bolt;
+        baseLabel = 'Energy Restored!';
+        break;
+      case PowerUpType.timeBomb:
+        // Activate time bomb that clears screen after 3 seconds
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted && !gameState.gameOver) {
+            gameState.clearScreen();
+            _audioService.playExplosionSound();
+          }
+        });
+        _powerUpBannerIcon = Icons.timer;
+        baseLabel = 'Time Bomb Set!';
+        break;
+      case PowerUpType.magnet:
+        // Attract nearby power-ups for 10 seconds
+        // This would need additional implementation in the power-up update logic
+        _powerUpBannerIcon = Icons.auto_awesome;
+        baseLabel = 'Magnet Active!';
+        break;
+      case PowerUpType.drone:
+        // Deploy auto-firing drone for 15 seconds
+        // This would need additional implementation
+        _powerUpBannerIcon = Icons.airplanemode_active;
+        baseLabel = 'Drone Deployed!';
+        break;
+      case PowerUpType.freeze:
+        // Freeze all enemies for 5 seconds
+        // This would need additional implementation
+        gameState.activateTimeSlow(5);
+        _powerUpBannerIcon = Icons.ac_unit;
+        baseLabel = 'Enemies Frozen!';
         break;
     }
 
@@ -432,6 +526,55 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       y: enemy.y,
       type: type,
     ));
+  }
+
+  void _handleAdvancedEnemyAbility(AdvancedEnemy enemy) {
+    enemy.useAbility();
+    
+    switch (enemy.type) {
+      case AdvancedEnemyType.sniper:
+        // Shoot aimed bullet at player
+        final dx = gameState.player.x - enemy.x;
+        final dy = gameState.player.y - enemy.y;
+        final distance = math.sqrt(dx * dx + dy * dy);
+        
+        gameState.enemyBullets.add(Bullet(
+          x: enemy.x + enemy.width / 2,
+          y: enemy.y + enemy.height,
+          isPlayerBullet: false,
+        )..speed = 6);
+        break;
+      case AdvancedEnemyType.healer:
+        // Heal nearby enemies
+        for (var otherEnemy in gameState.advancedEnemies) {
+          if (otherEnemy != enemy && otherEnemy.alive) {
+            final distance = math.sqrt(
+              math.pow(otherEnemy.x - enemy.x, 2) + math.pow(otherEnemy.y - enemy.y, 2)
+            );
+            if (distance < 100) {
+              otherEnemy.health = math.min(otherEnemy.health + 1, otherEnemy.maxHealth);
+            }
+          }
+        }
+        break;
+      case AdvancedEnemyType.spawner:
+        // Spawn smaller enemies
+        for (int i = 0; i < 2; i++) {
+          gameState.enemies.add(Enemy(
+            x: enemy.x + (i - 0.5) * 30,
+            y: enemy.y + 20,
+            type: 0,
+          )..speed = 1.5);
+        }
+        break;
+      case AdvancedEnemyType.tank:
+      case AdvancedEnemyType.morphing:
+      case AdvancedEnemyType.phantom:
+      case AdvancedEnemyType.shielded:
+      case AdvancedEnemyType.teleporter:
+        // Other enemies use default behavior
+        break;
+    }
   }
 
   void _togglePause() {
@@ -522,6 +665,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
       final dy = (_random.nextDouble() * 2 - 1) * mag;
       shakeOffset = Offset(dx, dy);
     }
+    
+    // Apply screen shake from game state
+    if (gameState.screenShakeDuration > 0) {
+      final double mag = gameState.screenShakeIntensity * (gameState.screenShakeDuration / 0.5);
+      final dx = (_random.nextDouble() * 2 - 1) * mag;
+      final dy = (_random.nextDouble() * 2 - 1) * mag;
+      shakeOffset += Offset(dx, dy);
+    }
 
     Color powerBannerColor;
     switch (gameState.mode) {
@@ -577,6 +728,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               });
             } else if (event.logicalKey == LogicalKeyboardKey.space) {
               _fireBullet();
+            } else if (event.logicalKey == LogicalKeyboardKey.keyQ) {
+              gameState.switchWeapon(-1);
+            } else if (event.logicalKey == LogicalKeyboardKey.keyE) {
+              gameState.switchWeapon(1);
+            } else if (event.logicalKey == LogicalKeyboardKey.digit1) {
+              gameState.player.useSpecialAbility(SpecialAbility.timeSlow);
+            } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
+              gameState.player.useSpecialAbility(SpecialAbility.screenClear);
+            } else if (event.logicalKey == LogicalKeyboardKey.digit3) {
+              gameState.player.useSpecialAbility(SpecialAbility.megaShield);
+            } else if (event.logicalKey == LogicalKeyboardKey.digit4) {
+              gameState.player.useSpecialAbility(SpecialAbility.rapidFire);
             } else if (event.logicalKey == LogicalKeyboardKey.escape ||
                        event.logicalKey == LogicalKeyboardKey.keyP) {
               _togglePause();
@@ -642,7 +805,30 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                   )),
               
-              // Enemies
+              // Environmental hazards
+              ...gameState.hazards.map((hazard) => Positioned(
+                    top: hazard.y,
+                    left: hazard.x,
+                    child: EnvironmentalHazardWidget(
+                      hazard: hazard,
+                      time: time,
+                    ),
+                  )),
+              
+              // Advanced enemies
+              ...gameState.advancedEnemies.map((enemy) {
+                if (!enemy.alive) return SizedBox.shrink();
+                return Positioned(
+                  top: enemy.y,
+                  left: enemy.x,
+                  child: AdvancedEnemyWidget(
+                    enemy: enemy,
+                    time: time,
+                  ),
+                );
+              }),
+              
+              // Regular enemies
               ...gameState.enemies.map((enemy) {
                 if (!enemy.alive) return SizedBox.shrink();
                 final double pulse = 1.0 +
@@ -665,11 +851,16 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     child: BulletWidget(bullet: bullet),
                   )),
               
-              // Player bullets
+              // Player bullets with weapon-specific trails
               ...gameState.bullets.map((bullet) => Positioned(
                     top: bullet.y,
                     left: bullet.x,
-                    child: BulletWidget(bullet: bullet),
+                    child: BulletTrailWidget(
+                      x: bullet.x,
+                      y: bullet.y,
+                      weaponType: gameState.player.currentWeapon.type,
+                      isPlayerBullet: true,
+                    ),
                   )),
               
               // Power-ups
@@ -723,6 +914,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                                 fontSize: 16,
                               ),
                             ),
+                            Text(
+                              'Weapon: ${gameState.player.currentWeapon.name}',
+                              style: TextStyle(
+                                color: gameState.player.currentWeapon.color,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                             if (gameState.mode == GameMode.galacticRun &&
                                 gameState.currentModifier != null) ...[
                               const SizedBox(height: 2),
@@ -742,6 +941,18 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                                   color: Colors.orangeAccent,
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                            if (gameState.difficultyMultiplier != 1.0) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Difficulty: ${(gameState.difficultyMultiplier * 100).round()}%',
+                                style: TextStyle(
+                                  color: gameState.difficultyMultiplier > 1.0 
+                                      ? Colors.redAccent 
+                                      : Colors.greenAccent,
+                                  fontSize: 14,
                                 ),
                               ),
                             ],
@@ -769,7 +980,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             Row(
-                              children: List.generate(3, (index) {
+                              children: List.generate(5, (index) {
                                 return Padding(
                                   padding:
                                       const EdgeInsets.only(right: 4),
@@ -780,23 +991,100 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                                     color: index < gameState.player.lives
                                         ? Colors.red
                                         : Colors.grey,
-                                    size: 24,
+                                    size: 20,
                                   ),
                                 );
                               }),
                             ),
                             const SizedBox(height: 4),
+                            // Weapon energy bar
+                            SizedBox(
+                              width: 100,
+                              child: Column(
+                                children: [
+                                  Text(
+                                    'Energy',
+                                    style: TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  Container(
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white24,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                    child: FractionallySizedBox(
+                                      alignment: Alignment.centerLeft,
+                                      widthFactor: gameState.player.weaponEnergy / 100,
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: gameState.player.weaponEnergy > 30 
+                                              ? Colors.green 
+                                              : Colors.orange,
+                                          borderRadius: BorderRadius.circular(2),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 8),
                             const Text(
-                              'P: Pause',
+                              'P: Pause | Q/E: Weapons',
                               style: TextStyle(
                                 color: Colors.white54,
-                                fontSize: 12,
+                                fontSize: 10,
+                              ),
+                            ),
+                            const Text(
+                              '1-4: Abilities',
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
                               ),
                             ),
                           ],
                         ),
                       ],
                     ),
+                    
+                    // Weapon selection bar
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 60,
+                      child: Row(
+                        children: gameState.availableWeapons.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final weapon = entry.value;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: WeaponWidget(
+                              weapon: weapon,
+                              isActive: index == gameState.currentWeaponIndex,
+                              energy: gameState.player.weaponEnergy.toDouble(),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    
+                    // Special abilities bar
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 60,
+                      child: Row(
+                        children: gameState.player.specialAbilities.map((ability) {
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: SpecialAbilityWidget(ability: ability),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    
                     if (gameState.hasMultiShot ||
                         gameState.hasSpeedBoost ||
                         gameState.player.isInvulnerable)

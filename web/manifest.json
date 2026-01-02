@@ -1,11 +1,11 @@
 {
-    "name": "space_invaders",
-    "short_name": "space_invaders",
+    "name": "Space Invaders - Modern Arcade Shooter",
+    "short_name": "Space Invaders",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#1a1a2e",
+    "theme_color": "#00d4ff",
+    "description": "A modern, feature-rich space shooter with advanced weapons, special abilities, hazards, and dynamic difficulty scaling.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -198,9 +198,11 @@ class _CampaignScreenState extends State<CampaignScreen> {
       case GameMode.survival:
         return Icons.all_inclusive;
       case GameMode.hardcore:
-        return Icons.whatshot;
+        return Icons.warning;
       case GameMode.galacticRun:
-        return Icons.bolt;
+        return Icons.rocket_launch;
+      case GameMode.bossRush:
+        return Icons.psychology;
     }
   }
 }

@@ -8,7 +8,7 @@ class PowerUpWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final baseColor = powerUp.getColor();
+    final baseColor = powerUp.color;
     return Container(
       width: powerUp.width + 8,
       height: powerUp.height + 8,

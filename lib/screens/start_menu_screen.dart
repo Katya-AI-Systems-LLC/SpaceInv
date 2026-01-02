@@ -302,7 +302,7 @@ class StartMenuScreen extends StatelessWidget {
     return SimpleDialogOption(
       onPressed: () => Navigator.pop(context, mode),
       child: Padding(
-        const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
             Icon(_iconForMode(mode), color: Colors.greenAccent),

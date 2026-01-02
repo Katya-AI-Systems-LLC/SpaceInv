@@ -96,6 +96,62 @@ The game uses fallback colored widgets if image assets are not found. To add cus
 
 2. The game will automatically use them if present, otherwise uses colorful widget fallbacks.
 
+## 🎨 Random Icon Generator
+
+The project includes a random icon generator that creates unique app icons for all platforms!
+
+### Quick Start
+
+```bash
+# Generate random icons for all platforms
+python tools/generate_icons.py
+
+# Or use the quick helper (with optional rebuild)
+python tools/quick_icons.py --rebuild
+
+# For Windows, just run the batch file
+tools\generate_icons.bat
+
+# For Mac/Linux
+bash tools/generate_icons.sh
+```
+
+### What it Does
+
+- ✅ Generates 47 unique icons for all platforms
+- ✅ Supports Android, iOS, Web, Windows, macOS, Linux
+- ✅ Uses random color palettes (Neon, Space, Cyberpunk, etc.)
+- ✅ Creates geometric shapes (circles, squares, triangles, stars)
+- ✅ Adds glow border effects
+- ✅ Each run creates a completely different design!
+
+### Platforms & Sizes
+
+| Platform | Icons | Sizes |
+|----------|-------|-------|
+| Android | 6 | ldpi, mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi |
+| iOS | 15 | 20, 29, 40, 60, 76, 83.5, 1024 (various scales) |
+| Web | 4 | 192, 512 (normal + maskable) |
+| Windows | 1 | 256x256 (ICO format) |
+| macOS | 7 | 16, 32, 64, 128, 256, 512, 1024 |
+| Linux | 1 | 256x256 |
+
+### Files
+
+- `tools/generate_icons.py` - Main Python generator
+- `tools/quick_icons.py` - Quick helper with rebuild options
+- `tools/generate_icons.bat` - Windows batch runner
+- `tools/generate_icons.sh` - Mac/Linux shell runner
+- `tools/ICON_GENERATOR_README.md` - Detailed documentation
+
+### Rebuild After Icon Changes
+
+```bash
+flutter clean
+flutter pub get
+flutter run
+```
+
 ## Getting Started
 
 1. Install Flutter dependencies:

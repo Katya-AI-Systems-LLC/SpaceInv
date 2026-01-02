@@ -27,8 +27,8 @@ const String kLeaderboardApiKey =
 class RestOnlineLeaderboardClient implements OnlineLeaderboardClient {
   final http.Client _client;
 
-  const RestOnlineLeaderboardClient({http.Client? client})
-      : _client = client ?? const http.Client();
+  RestOnlineLeaderboardClient({http.Client? client})
+      : _client = client ?? http.Client();
 
   bool get _enabled => kLeaderboardApiBaseUrl.isNotEmpty;
 

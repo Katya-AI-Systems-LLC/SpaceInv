@@ -28,7 +28,7 @@ class Web3BridgeService {
   factory Web3BridgeService() => _instance;
   Web3BridgeService._internal();
 
-  final http.Client _client = const http.Client();
+  final http.Client _client = http.Client();
   final math.Random _random = math.Random();
 
   bool get isEnabled => kWeb3BridgeApiBaseUrl.isNotEmpty;

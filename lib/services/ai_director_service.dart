@@ -15,7 +15,7 @@ class AiDirectorService {
   factory AiDirectorService() => _instance;
   AiDirectorService._internal();
 
-  final http.Client _client = const http.Client();
+  final http.Client _client = http.Client();
 
   bool get isEnabled => kAiDirectorApiBaseUrl.isNotEmpty;
 

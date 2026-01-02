@@ -20,7 +20,7 @@ void main() async {
   await LocalizationService().load();
   await UpgradesService().load();
   // Configure optional online leaderboard client (no-op if base URL is empty)
-  LeaderboardService().configureOnlineClient(const RestOnlineLeaderboardClient());
+  LeaderboardService().configureOnlineClient(RestOnlineLeaderboardClient());
   runApp(const SpaceInvadersApp());
 }
 
