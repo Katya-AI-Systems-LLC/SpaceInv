@@ -1,0 +1,23 @@
+# Helm Chart for Space Invaders Enhanced Edition
+
+apiVersion: v2
+name: space-invaders
+description: A Helm chart for Space Invaders Enhanced Edition
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - game
+  - flutter
+  - web
+  - space-invaders
+home: https://github.com/your-username/space-invaders
+sources:
+  - https://github.com/your-username/space-invaders
+maintainers:
+  - name: Space Invaders Team
+    email: team@space-invaders.com
+icon: https://raw.githubusercontent.com/your-username/space-invaders/main/assets/icon.png
+annotations:
+  category: Entertainment
+  licenses: MIT

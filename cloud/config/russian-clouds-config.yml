@@ -1,0 +1,723 @@
+# Russian Cloud Configuration for Space Invaders Enhanced Edition
+
+## Russian Cloud Providers Configuration
+
+### Yandex Cloud Configuration
+```yaml
+# yandex-cloud-config.yml
+yandex_cloud:
+  # Account Configuration
+  account:
+    folder_id: "${YC_FOLDER_ID}"
+    service_account_key: "${YC_SERVICE_ACCOUNT_KEY}"
+    cloud_id: "${YC_CLOUD_ID}"
+    
+  # Storage Configuration
+  storage:
+    bucket_name: "${YC_BUCKET_NAME}"
+    storage_class: "standard"
+    access_mode: "public-read"
+    versioning: true
+    encryption: "AES256"
+    lifecycle_rules:
+      - id: "delete_old_versions"
+        status: "Enabled"
+        expiration:
+          days: 30
+        noncurrent_version_expiration:
+          noncurrent_days: 7
+  
+  # Functions Configuration
+  functions:
+    name: "space-invaders-function"
+    runtime: "nodejs16"
+    memory: "512MB"
+    timeout: "10s"
+    environment_variables:
+      ENVIRONMENT: "${ENVIRONMENT}"
+      LOG_LEVEL: "info"
+    concurrency: 10
+    execution_timeout: "10s"
+    
+  # API Gateway Configuration
+  api_gateway:
+    name: "space-invaders-api"
+    domain: "space-invaders.yandexcloud.net"
+    spec_file: "api-gateway-spec.yaml"
+    
+  # Network Configuration
+  network:
+    name: "space-invaders-network"
+    subnet_name: "space-invaders-subnet"
+    zone: "ru-central1-a"
+    v4_cidr_blocks: ["10.0.0.0/24"]
+    
+  # Security Configuration
+  security:
+    iam_policies:
+      - role: "storage.admin"
+        resource: "bucket"
+        members: ["serviceAccount:${SERVICE_ACCOUNT_ID}"]
+      - role: "functions.invoker"
+        resource: "function"
+        members: ["allUsers"]
+    network_security_groups:
+      - name: "space-invaders-nsg"
+        rules:
+          - direction: "ingress"
+            protocol: "TCP"
+            port: 80
+            cidr_blocks: ["0.0.0.0/0"]
+          - direction: "ingress"
+            protocol: "TCP"
+            port: 443
+            cidr_blocks: ["0.0.0.0/0"]
+```
+
+### VK Cloud Configuration
+```yaml
+# vk-cloud-config.yml
+vk_cloud:
+  # Account Configuration
+  account:
+    username: "${VK_CLOUD_USERNAME}"
+    password: "${VK_CLOUD_PASSWORD}"
+    token: "${VK_CLOUD_TOKEN}"
+    project_id: "${VK_CLOUD_PROJECT_ID}"
+    
+  # Container Registry Configuration
+  registry:
+    url: "${VK_CLOUD_REGISTRY}"
+    namespace: "space-invaders"
+    image_name: "space-invaders"
+    tag: "latest"
+    credentials:
+      username: "${VK_CLOUD_USERNAME}"
+      password: "${VK_CLOUD_PASSWORD}"
+    
+  # Storage Configuration
+  storage:
+    endpoint: "${VK_CLOUD_STORAGE_URL}"
+    container_name: "space-invaders"
+    access_level: "public"
+    cors_rules:
+      - allowed_origins: ["*"]
+        allowed_methods: ["GET", "POST", "PUT", "DELETE"]
+        allowed_headers: ["*"]
+        max_age_seconds: 3600
+        
+  # Database Configuration
+  database:
+    type: "postgresql"
+    version: "13"
+    instance_name: "space-invaders-db"
+    size: "small"
+    storage_size: "100GB"
+    backup_retention: 7
+    connection_pool_size: 10
+    
+  # Compute Configuration
+  compute:
+    instance_type: "small"
+    image: "ubuntu-20.04"
+    disk_size: "50GB"
+    network_type: "public"
+    security_groups:
+      - "space-invaders-sg"
+      
+  # Network Configuration
+  network:
+    name: "space-invaders-network"
+    subnet_cidr: "192.168.1.0/24"
+    gateway: "192.168.1.1"
+    dns_servers: ["8.8.8.8", "8.8.4.4"]
+    
+  # Security Configuration
+  security:
+    firewall_rules:
+      - direction: "ingress"
+        protocol: "TCP"
+        port: 80
+        source: "0.0.0.0/0"
+      - direction: "ingress"
+        protocol: "TCP"
+        port: 443
+        source: "0.0.0.0/0"
+      - direction: "ingress"
+        protocol: "TCP"
+        port: 22
+        source: "10.0.0.0/8"
+```
+
+### Selectel Configuration
+```yaml
+# selectel-config.yml
+selectel:
+  # Account Configuration
+  account:
+    username: "${SELECTEL_USERNAME}"
+    password: "${SELECTEL_PASSWORD}"
+    token: "${SELECTEL_TOKEN}"
+    
+  # Storage Configuration
+  storage:
+    container_name: "${SELECTEL_CONTAINER}"
+    storage_type: "standard"
+    access_policy: "public-read"
+    versioning: true
+    encryption: "AES256"
+    
+  # Cloud Server Configuration
+  server:
+    name: "space-invaders-server"
+    flavor: "basic-1-2-50"
+    image: "ubuntu-20.04"
+    disk_size: "50GB"
+    ssh_key: "${SELECTEL_SSH_KEY}"
+    ssh_user: "${SELECTEL_SSH_USER}"
+    floating_ip: "${SELECTEL_SERVER_IP}"
+    
+  # Network Configuration
+  network:
+    name: "space-invaders-network"
+    subnet_cidr: "10.0.1.0/24"
+    gateway: "10.0.1.1"
+    dns_servers: ["8.8.8.8", "8.8.4.4"]
+    
+  # Security Configuration
+  security:
+    security_groups:
+      - name: "space-invaders-sg"
+        rules:
+          - direction: "ingress"
+            protocol: "TCP"
+            port: 80
+            cidr: "0.0.0.0/0"
+          - direction: "ingress"
+            protocol: "TCP"
+            port: 443
+            cidr: "0.0.0.0/0"
+          - direction: "ingress"
+            protocol: "TCP"
+            port: 22
+            cidr: "10.0.0.0/8"
+            
+  # Backup Configuration
+  backup:
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention_days: 30
+    backup_type: "full"
+    compression: true
+    encryption: true
+```
+
+## Multi-Cloud Configuration
+
+### Global Configuration
+```yaml
+# global-config.yml
+global:
+  # Application Configuration
+  application:
+    name: "space-invaders-enhanced"
+    version: "2.1.0"
+    environment: "${ENVIRONMENT}"
+    
+  # Monitoring Configuration
+  monitoring:
+    enabled: true
+    metrics_collection: true
+    log_aggregation: true
+    alerting: true
+    health_checks: true
+    
+  # Security Configuration
+  security:
+    encryption_at_rest: true
+    encryption_in_transit: true
+    access_logging: true
+    audit_logging: true
+    compliance_standards:
+      - "GDPR"
+      - "Russian Federal Law #152-FZ"
+      - "ISO 27001"
+      
+  # Performance Configuration
+  performance:
+    caching_enabled: true
+    cdn_enabled: true
+    compression_enabled: true
+    minification_enabled: true
+    
+  # Backup Configuration
+  backup:
+    enabled: true
+    schedule: "0 3 * * *"  # Daily at 3 AM
+    retention_days: 30
+    multi_region: true
+    encryption: true
+    
+  # DNS Configuration
+  dns:
+    primary_domain: "space-invaders.com"
+    cdn_domain: "cdn.space-invaders.com"
+    api_domain: "api.space-invaders.com"
+    ttl: 300
+    
+  # CDN Configuration
+  cdn:
+    enabled: true
+    providers:
+      - "yandex"
+      - "vk"
+      - "selectel"
+    cache_ttl: 3600
+    compression: true
+    https_only: true
+```
+
+### Environment-Specific Configuration
+```yaml
+# environments/staging.yml
+staging:
+  environment: "staging"
+  debug: true
+  log_level: "debug"
+  
+  # Cloud Provider Priority
+  cloud_priority:
+    primary: "yandex"
+    secondary: "vk"
+    tertiary: "selectel"
+    
+  # Resource Limits
+  resources:
+    cpu: "2 cores"
+    memory: "4GB"
+    storage: "100GB"
+    bandwidth: "1Gbps"
+    
+  # Scaling Configuration
+  scaling:
+    min_instances: 1
+    max_instances: 3
+    target_cpu: 70
+    target_memory: 80
+    
+  # Database Configuration
+  database:
+    size: "small"
+    backup_retention: 7
+    read_replicas: 0
+    
+  # Monitoring Configuration
+  monitoring:
+    alert_thresholds:
+      cpu: 80
+      memory: 85
+      disk: 90
+      response_time: 2000  # ms
+```
+
+```yaml
+# environments/production.yml
+production:
+  environment: "production"
+  debug: false
+  log_level: "info"
+  
+  # Cloud Provider Priority
+  cloud_priority:
+    primary: "yandex"
+    secondary: "vk"
+    tertiary: "selectel"
+    
+  # Resource Limits
+  resources:
+    cpu: "4 cores"
+    memory: "8GB"
+    storage: "500GB"
+    bandwidth: "10Gbps"
+    
+  # Scaling Configuration
+  scaling:
+    min_instances: 2
+    max_instances: 10
+    target_cpu: 60
+    target_memory: 70
+    
+  # Database Configuration
+  database:
+    size: "large"
+    backup_retention: 30
+    read_replicas: 2
+    
+  # Monitoring Configuration
+  monitoring:
+    alert_thresholds:
+      cpu: 70
+      memory: 80
+      disk: 85
+      response_time: 1000  # ms
+```
+
+## Integration Scripts
+
+### Multi-Cloud Deployment Orchestrator
+```python
+# multi_cloud_orchestrator.py
+import yaml
+import json
+import subprocess
+import asyncio
+from typing import Dict, List, Optional
+
+class MultiCloudOrchestrator:
+    def __init__(self, config_file: str):
+        self.config = self.load_config(config_file)
+        self.providers = self.config.get('providers', {})
+        
+    def load_config(self, config_file: str) -> Dict:
+        """Load configuration from YAML file"""
+        with open(config_file, 'r') as f:
+            return yaml.safe_load(f)
+    
+    async def deploy_to_provider(self, provider: str, environment: str) -> bool:
+        """Deploy to a specific cloud provider"""
+        print(f"🚀 Deploying to {provider}...")
+        
+        try:
+            if provider == "yandex":
+                return await self.deploy_to_yandex(environment)
+            elif provider == "vk":
+                return await self.deploy_to_vk(environment)
+            elif provider == "selectel":
+                return await self.deploy_to_selectel(environment)
+            else:
+                print(f"❌ Unknown provider: {provider}")
+                return False
+        except Exception as e:
+            print(f"❌ Deployment to {provider} failed: {e}")
+            return False
+    
+    async def deploy_to_yandex(self, environment: str) -> bool:
+        """Deploy to Yandex Cloud"""
+        config = self.providers.get('yandex', {})
+        
+        # Setup Yandex Cloud CLI
+        subprocess.run(['yc', 'config', 'profile', 'create', 'sa-profile'], check=True)
+        subprocess.run(['yc', 'config', 'set', 'service-account-key', config['service_account_key']], check=True)
+        subprocess.run(['yc', 'config', 'set', 'folder-id', config['folder_id']], check=True)
+        
+        # Deploy to storage
+        bucket_name = config['storage']['bucket_name']
+        subprocess.run([
+            'yc', 'storage', 's3', 'cp',
+            '--recursive',
+            '--endpoint-url=https://storage.yandexcloud.net',
+            'build/web/',
+            f's3://{bucket_name}/'
+        ], check=True)
+        
+        print(f"✅ Yandex Cloud deployment completed")
+        return True
+    
+    async def deploy_to_vk(self, environment: str) -> bool:
+        """Deploy to VK Cloud"""
+        config = self.providers.get('vk', {})
+        
+        # Build and push Docker image
+        subprocess.run(['docker', 'build', '-t', 'space-invaders:latest', '.'], check=True)
+        subprocess.run(['docker', 'tag', 'space-invaders:latest', f"{config['registry']['url']}/space-invaders:latest"], check=True)
+        subprocess.run(['docker', 'login', config['registry']['url'], '-u', config['account']['username'], '--password-stdin'], 
+                      input=config['account']['password'].encode(), check=True)
+        subprocess.run(['docker', 'push', f"{config['registry']['url']}/space-invaders:latest"], check=True)
+        
+        print(f"✅ VK Cloud deployment completed")
+        return True
+    
+    async def deploy_to_selectel(self, environment: str) -> bool:
+        """Deploy to Selectel"""
+        config = self.providers.get('selectel', {})
+        
+        # Deploy to storage
+        subprocess.run(['selectel-storage', 'upload',
+                       '--source', 'build/web/',
+                       '--destination', '/',
+                       '--recursive'], check=True)
+        
+        print(f"✅ Selectel deployment completed")
+        return True
+    
+    async def deploy_all(self, environment: str, parallel: bool = False) -> Dict[str, bool]:
+        """Deploy to all configured providers"""
+        providers = list(self.providers.keys())
+        results = {}
+        
+        if parallel:
+            # Deploy to all providers in parallel
+            tasks = [self.deploy_to_provider(provider, environment) for provider in providers]
+            results_list = await asyncio.gather(*tasks)
+            results = dict(zip(providers, results_list))
+        else:
+            # Deploy to providers sequentially
+            for provider in providers:
+                results[provider] = await self.deploy_to_provider(provider, environment)
+        
+        return results
+    
+    async def health_check_provider(self, provider: str) -> bool:
+        """Perform health check on a specific provider"""
+        try:
+            if provider == "yandex":
+                url = f"https://{self.providers['yandex']['storage']['bucket_name']}.storage.yandexcloud.net/health"
+            elif provider == "vk":
+                url = "https://space-invaders.vkcloud.com/health"
+            elif provider == "selectel":
+                url = f"https://{self.providers['selectel']['storage']['container_name']}.selcdn.ru/health"
+            else:
+                return False
+            
+            response = subprocess.run(['curl', '-f', url], capture_output=True, text=True)
+            return response.returncode == 0
+        except Exception:
+            return False
+    
+    async def health_check_all(self) -> Dict[str, bool]:
+        """Perform health checks on all providers"""
+        results = {}
+        for provider in self.providers.keys():
+            results[provider] = await self.health_check_provider(provider)
+        return results
+    
+    def generate_deployment_report(self, results: Dict[str, bool]) -> Dict:
+        """Generate deployment report"""
+        return {
+            "deployment": {
+                "timestamp": datetime.utcnow().isoformat(),
+                "providers": results,
+                "success_count": sum(results.values()),
+                "total_count": len(results),
+                "overall": "success" if all(results.values()) else "partial" if any(results.values()) else "failed"
+            }
+        }
+
+# Usage example
+async def main():
+    orchestrator = MultiCloudOrchestrator('russian-clouds-config.yml')
+    
+    # Deploy to all providers in parallel
+    results = await orchestrator.deploy_all('production', parallel=True)
+    
+    # Generate report
+    report = orchestrator.generate_deployment_report(results)
+    print(json.dumps(report, indent=2))
+    
+    # Perform health checks
+    health_results = await orchestrator.health_check_all()
+    print(f"Health check results: {health_results}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Configuration Validator
+```python
+# config_validator.py
+import yaml
+import json
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+
+@dataclass
+class ValidationResult:
+    valid: bool
+    errors: List[str]
+    warnings: List[str]
+
+class RussianCloudConfigValidator:
+    def __init__(self):
+        self.required_fields = {
+            'yandex': ['folder_id', 'service_account_key', 'bucket_name'],
+            'vk': ['username', 'password', 'token', 'project_id'],
+            'selectel': ['username', 'password', 'container_name']
+        }
+    
+    def validate_config(self, config_file: str) -> ValidationResult:
+        """Validate Russian Cloud configuration"""
+        try:
+            with open(config_file, 'r') as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            return ValidationResult(False, [f"Failed to load config: {e}"], [])
+        
+        errors = []
+        warnings = []
+        
+        # Validate each provider
+        for provider, required_fields in self.required_fields.items():
+            if provider in config.get('providers', {}):
+                provider_config = config['providers'][provider]
+                
+                # Check required fields
+                for field in required_fields:
+                    if field not in provider_config:
+                        errors.append(f"{provider}: Missing required field '{field}'")
+                
+                # Check for sensitive data in plain text
+                for field in ['password', 'token', 'service_account_key']:
+                    if field in provider_config and isinstance(provider_config[field], str):
+                        if len(provider_config[field]) > 10 and not provider_config[field].startswith('${'):
+                            warnings.append(f"{provider}: Field '{field}' appears to be in plain text")
+        
+        # Validate global configuration
+        global_config = config.get('global', {})
+        
+        if 'application' not in global_config:
+            errors.append("Missing global application configuration")
+        
+        if 'monitoring' not in global_config:
+            warnings.append("Missing global monitoring configuration")
+        
+        if 'security' not in global_config:
+            warnings.append("Missing global security configuration")
+        
+        return ValidationResult(len(errors) == 0, errors, warnings)
+
+# Usage example
+def main():
+    validator = RussianCloudConfigValidator()
+    result = validator.validate_config('russian-clouds-config.yml')
+    
+    if result.valid:
+        print("✅ Configuration is valid")
+    else:
+        print("❌ Configuration has errors:")
+        for error in result.errors:
+            print(f"  - {error}")
+    
+    if result.warnings:
+        print("⚠️ Configuration has warnings:")
+        for warning in result.warnings:
+            print(f"  - {warning}")
+
+if __name__ == "__main__":
+    main()
+```
+
+## Environment Variables Template
+
+### .env.template
+```bash
+# Russian Cloud Configuration Template
+# Copy this file to .env and fill in your actual values
+
+# Yandex Cloud
+YC_FOLDER_ID=your-folder-id
+YC_CLOUD_ID=your-cloud-id
+YC_SERVICE_ACCOUNT_KEY=path/to/service-account-key.json
+YC_BUCKET_NAME=space-invaders-storage
+
+# VK Cloud
+VK_CLOUD_USERNAME=your-username
+VK_CLOUD_PASSWORD=your-password
+VK_CLOUD_TOKEN=your-token
+VK_CLOUD_PROJECT_ID=your-project-id
+VK_CLOUD_REGISTRY=registry.vkcloud.com
+VK_CLOUD_STORAGE_URL=https://storage.vkcloud.com/upload
+VK_CLOUD_DATABASE_URL=https://database.vkcloud.com
+
+# Selectel
+SELECTEL_USERNAME=your-username
+SELECTEL_PASSWORD=your-password
+SELECTEL_TOKEN=your-token
+SELECTEL_CONTAINER=space-invaders
+SELECTEL_SERVER_IP=your-server-ip
+SELECTEL_SSH_USER=your-ssh-user
+SELECTEL_SSH_KEY=path/to/ssh-key
+
+# Global Configuration
+ENVIRONMENT=staging
+LOG_LEVEL=info
+DEBUG=false
+
+# Monitoring
+MONITORING_ENABLED=true
+ALERT_WEBHOOK_URL=https://hooks.slack.com/services/...
+NOTIFICATION_WEBHOOK_URL=https://hooks.slack.com/services/...
+
+# Security
+ENCRYPTION_ENABLED=true
+COMPLIANCE_ENABLED=true
+AUDIT_LOGGING=true
+
+# Performance
+CACHING_ENABLED=true
+CDN_ENABLED=true
+COMPRESSION_ENABLED=true
+
+# Backup
+BACKUP_ENABLED=true
+BACKUP_SCHEDULE=0 3 * * *
+BACKUP_RETENTION_DAYS=30
+BACKUP_ENCRYPTION=true
+
+# DNS
+PRIMARY_DOMAIN=space-invaders.com
+CDN_DOMAIN=cdn.space-invaders.com
+API_DOMAIN=api.space-invaders.com
+DNS_TTL=300
+
+# Scaling
+MIN_INSTANCES=1
+MAX_INSTANCES=5
+TARGET_CPU=70
+TARGET_MEMORY=80
+
+# Database
+DB_SIZE=small
+DB_BACKUP_RETENTION=7
+DB_READ_REPLICAS=0
+DB_CONNECTION_POOL_SIZE=10
+```
+
+## Usage Instructions
+
+### Setup and Configuration
+```bash
+# 1. Install dependencies
+pip install pyyaml asyncio
+
+# 2. Copy configuration template
+cp russian-clouds-config.yml.template russian-clouds-config.yml
+cp .env.template .env
+
+# 3. Fill in your actual values
+# Edit russian-clouds-config.yml with your cloud provider details
+# Edit .env with your environment variables
+
+# 4. Validate configuration
+python config_validator.py
+
+# 5. Deploy to Russian clouds
+python multi_cloud_orchestrator.py
+
+# 6. Monitor deployments
+python multi_cloud_orchestrator.py --monitor
+
+# 7. Perform health checks
+python multi_cloud_orchestrator.py --health-check
+```
+
+### Integration with CI/CD
+```yaml
+# Example integration in GitHub Actions
+- name: Deploy to Russian Clouds
+  run: |
+    python multi_cloud_orchestrator.py \
+      --config russian-clouds-config.yml \
+      --environment ${{ github.event.inputs.environment }} \
+      --parallel ${{ github.event.inputs.parallel_deploy }}
+```
+
+This comprehensive configuration system provides complete integration with Russian cloud providers, including Yandex Cloud, VK Cloud, and Selectel, with automated deployment, monitoring, and compliance features.

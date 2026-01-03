@@ -1,0 +1,704 @@
+# Bitbucket Pipelines Templates for Space Invaders Enhanced Edition
+
+# Security Audit and Compliance Pipeline
+pipelines:
+  custom:
+    security-audit:
+      - step:
+          name: 'Security Code Analysis'
+          image: python:3.11
+          script:
+            - echo "🔒 Starting security code analysis..."
+            - pip install bandit safety semgrep
+            - npm install -g audit-ci snyk
+            - flutter pub get
+            
+            # Run security scans
+            - bandit -r . -f json -o bandit-report.json
+            - bandit -r . -f html -o bandit-report.html
+            - safety check --json --output safety-report.json
+            - safety check --html --output safety-report.html
+            - semgrep --config=auto --json --output=semgrep-report.json .
+            - semgrep --config=auto --html --output=semgrep-report.html .
+            - snyk test --json --output-file=snyk-report.json || true
+            - npm audit --json > npm-audit-report.json || true
+            - flutter analyze --format=json > flutter-analysis.json || true
+          artifacts:
+            - bandit-report.json
+            - bandit-report.html
+            - safety-report.json
+            - safety-report.html
+            - semgrep-report.json
+            - semgrep-report.html
+            - snyk-report.json
+            - npm-audit-report.json
+            - flutter-analysis.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security code analysis completed'
+
+    api-security-testing:
+      - step:
+          name: 'API Security Testing'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🔌 Starting API security testing..."
+            - pip install pytest pytest-asyncio
+            - pip install httpx fastapi uvicorn
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Start API server
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Run API security tests
+            - pytest tests/security/api/ --junitxml=api-security-results.xml --tb=short
+            - pytest tests/security/auth/ --junitxml=auth-security-results.xml --tb=short
+            - pytest tests/security/authz/ --junitxml=authz-security-results.xml --tb=short
+            - pytest tests/security/input-validation/ --junitxml=input-validation-results.xml --tb=short
+            
+            # Run OWASP ZAP scan
+            - docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8000 -J zap-report.json -I zap-report.html || true
+          artifacts:
+            - api-security-results.xml
+            - auth-security-results.xml
+            - authz-security-results.xml
+            - input-validation-results.xml
+            - zap-report.json
+            - zap-report.html
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'API security testing completed'
+
+    penetration-testing:
+      - step:
+          name: 'Penetration Testing'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "💥 Starting penetration testing..."
+            - pip install pytest pytest-asyncio
+            - pip install httpx fastapi uvicorn
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Start API server
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Run penetration tests
+            - pytest tests/penetration/sql-injection/ --junitxml=sql-injection-results.xml --tb=short
+            - pytest tests/penetration/xss/ --junitxml=xss-results.xml --tb=short
+            - pytest tests/penetration/csrf/ --junitxml=csrf-results.xml --tb=short
+            - pytest tests/penetration/auth-bypass/ --junitxml=auth-bypass-results.xml --tb=short
+            - pytest tests/penetration/privilege-escalation/ --junitxml=privilege-escalation-results.xml --tb=short
+            - pytest tests/penetration/data-exposure/ --junitxml=data-exposure-results.xml --tb=short
+          artifacts:
+            - sql-injection-results.xml
+            - xss-results.xml
+            - csrf-results.xml
+            - auth-bypass-results.xml
+            - privilege-escalation-results.xml
+            - data-exposure-results.xml
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Penetration testing completed'
+
+    compliance-audit:
+      - step:
+          name: 'Compliance Audit'
+          image: python:3.11
+          script:
+            - echo "🏛️ Starting compliance audit..."
+            - pip install -r requirements.txt
+            
+            # Run compliance checks
+            - python scripts/check_gdpr_compliance.py --output gdpr-compliance-report.json
+            - python scripts/check_russian_compliance.py --output russian-compliance-report.json
+            - python scripts/check_pci_dss_compliance.py --output pci-dss-compliance-report.json
+            - python scripts/check_iso27001_compliance.py --output iso27001-compliance-report.json
+            - python scripts/check_data_residency.py --output data-residency-report.json
+            - python scripts/check_privacy_policy.py --output privacy-policy-report.json
+          artifacts:
+            - gdpr-compliance-report.json
+            - russian-compliance-report.json
+            - pci-dss-compliance-report.json
+            - iso27001-compliance-report.json
+            - data-residency-report.json
+            - privacy-policy-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Compliance audit completed'
+
+    russian-cloud-security:
+      - step:
+          name: 'Russian Cloud Security Audit'
+          image: python:3.11
+          script:
+            - echo "☁️ Starting Russian Cloud security audit..."
+            - pip install -r requirements.txt
+            
+            # Audit Russian cloud providers
+            - python scripts/audit_yandex_cloud_security.py --output yandex-cloud-security-report.json
+            - python scripts/audit_vk_cloud_security.py --output vk-cloud-security-report.json
+            - python scripts/audit_selectel_security.py --output selectel-security-report.json
+            - python scripts/check_russian_data_residency.py --output russian-data-residency-report.json
+          artifacts:
+            - yandex-cloud-security-report.json
+            - vk-cloud-security-report.json
+            - selectel-security-report.json
+            - russian-data-residency-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Russian Cloud security audit completed'
+
+    risk-assessment:
+      - step:
+          name: 'Risk Assessment'
+          image: python:3.11
+          script:
+            - echo "🎯 Starting risk assessment..."
+            - pip install -r requirements.txt
+            
+            # Run risk assessments
+            - python scripts/assess_security_risk.py --output security-risk-assessment.json
+            - python scripts/assess_operational_risk.py --output operational-risk-assessment.json
+            - python scripts/assess_financial_risk.py --output financial-risk-assessment.json
+            - python scripts/assess_compliance_risk.py --output compliance-risk-assessment.json
+            - python scripts/assess_performance_risk.py --output performance-risk-assessment.json
+          artifacts:
+            - security-risk-assessment.json
+            - operational-risk-assessment.json
+            - financial-risk-assessment.json
+            - compliance-risk-assessment.json
+            - performance-risk-assessment.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Risk assessment completed'
+
+    performance-profiling:
+      - step:
+          name: 'Performance Profiling'
+          image: python:3.11
+          script:
+            - echo "⚡ Starting performance profiling..."
+            - pip install py-spy memory-profiler
+            - npm install -g clinic
+            - flutter pub get
+            
+            # Run performance profiling
+            - python -m py-spy top --output python-profile.svg --duration 30 python scripts/sample_backend.py &
+            - sleep 35
+            - python -m memory_profiler scripts/memory_intensive_task.py > memory-profile.txt
+            - node --prof scripts/sample_frontend.js
+            - node --prof-process isolate-*.v8.log > node-profile.txt
+            - clinic doctor -- node scripts/sample_frontend.js > clinic-report.json
+            - flutter test --profile --reporter=json > flutter-profile.json
+          artifacts:
+            - python-profile.svg
+            - memory-profile.txt
+            - node-profile.txt
+            - clinic-report.json
+            - flutter-profile.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Performance profiling completed'
+
+    database-performance:
+      - step:
+          name: 'Database Performance Optimization'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🗄️ Starting database performance optimization..."
+            - pip install psycopg2-binary sqlalchemy
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Run database performance analysis
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - python scripts/analyze_slow_queries.py --database-url $DATABASE_URL --output slow-queries-analysis.json
+            - python scripts/analyze_database_performance.py --database-url $DATABASE_URL --output database-performance-analysis.json
+            - python scripts/analyze_redis_performance.py --redis-url $REDIS_URL --output redis-performance-analysis.json
+            
+            # Generate optimizations
+            - python scripts/generate_query_optimizations.py --database-url $DATABASE_URL --output query-optimizations.json
+            - python scripts/create_optimized_indexes.py --database-url $DATABASE_URL --output index-optimizations.json
+          artifacts:
+            - slow-queries-analysis.json
+            - database-performance-analysis.json
+            - redis-performance-analysis.json
+            - query-optimizations.json
+            - index-optimizations.json
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Database performance optimization completed'
+
+    api-performance:
+      - step:
+          name: 'API Performance Optimization'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🔌 Starting API performance optimization..."
+            - pip install pytest pytest-asyncio
+            - pip install httpx fastapi uvicorn
+            - pip install locust
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Start API server
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Run API performance analysis
+            - python scripts/analyze_api_performance.py --base-url http://localhost:8000 --output api-performance-analysis.json
+            - python scripts/analyze_endpoint_performance.py --base-url http://localhost:8000 --output endpoint-performance-analysis.json
+            
+            # Run API load testing
+            - locust -f tests/performance/api/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host http://localhost:8000 --html api-load-test-report.html --csv api-load-test-results.csv
+            
+            # Generate API optimizations
+            - python scripts/generate_api_optimizations.py --performance-analysis api-performance-analysis.json --endpoint-analysis endpoint-performance-analysis.json --load-test-results api-load-test-results.csv --output api-optimizations.json
+          artifacts:
+            - api-performance-analysis.json
+            - endpoint-performance-analysis.json
+            - api-load-test-report.html
+            - api-load-test-results.csv
+            - api-optimizations.json
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'API performance optimization completed'
+
+    frontend-performance:
+      - step:
+          name: 'Frontend Performance Optimization'
+          image: python:3.11
+          script:
+            - echo "🌐 Starting frontend performance optimization..."
+            - npm install -g lighthouse-cli webpack-bundle-analyzer
+            - flutter pub get
+            
+            # Build web application
+            - flutter build web --profile --web-renderer canvaskit
+            
+            # Run Lighthouse audit
+            - cd build/web && python -m http.server 8080 &
+            - sleep 5
+            - lighthouse http://localhost:8080 --output=json --output-path=lighthouse-report.json --chrome-flags="--headless"
+            - lighthouse http://localhost:8080 --output=html --output-path=lighthouse-report.html --chrome-flags="--headless"
+            
+            # Analyze bundle size
+            - webpack-bundle-analyzer build/web/main.dart.js --mode=json --output=bundle-analysis.json
+            
+            # Generate frontend optimizations
+            - python scripts/generate_frontend_optimizations.py --lighthouse-report lighthouse-report.json --bundle-analysis bundle-analysis.json --output frontend-optimizations.json
+            
+            # Apply optimizations
+            - python scripts/apply_frontend_optimizations.py --optimizations frontend-optimizations.json --build-dir build/web
+            
+            # Rebuild with optimizations
+            - flutter build web --release --web-renderer canvaskit
+            
+            # Test optimized performance
+            - cd build/web && python -m http.server 8080 &
+            - sleep 5
+            - lighthouse http://localhost:8080 --output=json --output-path=optimized-lighthouse-report.json --chrome-flags="--headless"
+          artifacts:
+            - lighthouse-report.json
+            - lighthouse-report.html
+            - bundle-analysis.json
+            - frontend-optimizations.json
+            - optimized-lighthouse-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Frontend performance optimization completed'
+
+    mobile-performance:
+      - step:
+          name: 'Mobile Performance Optimization'
+          image: python:3.11
+          script:
+            - echo "📱 Starting mobile performance optimization..."
+            - flutter pub get
+            - flutter pub add dev:flutter_driver
+            
+            # Build mobile applications
+            - flutter build apk --profile
+            - flutter build ios --profile
+            
+            # Run mobile performance tests
+            - flutter test --profile integration_test/app_test.dart --driver integration_test/driver.dart --output=mobile-performance-results.json
+            
+            # Analyze mobile performance
+            - python scripts/analyze_mobile_performance.py --flutter-results mobile-performance-results.json --output mobile-performance-analysis.json
+            
+            # Generate mobile optimizations
+            - python scripts/generate_mobile_optimizations.py --performance-analysis mobile-performance-analysis.json --output mobile-optimizations.json
+            
+            # Apply mobile optimizations
+            - python scripts/apply_mobile_optimizations.py --optimizations mobile-optimizations.json
+            
+            # Rebuild with optimizations
+            - flutter build apk --release
+            - flutter build ios --release
+            
+            # Test optimized mobile performance
+            - flutter test --profile integration_test/app_test.dart --driver integration_test/driver.dart --output=optimized-mobile-performance-results.json
+          artifacts:
+            - mobile-performance-results.json
+            - mobile-performance-analysis.json
+            - mobile-optimizations.json
+            - optimized-mobile-performance-results.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Mobile performance optimization completed'
+
+    comprehensive-audit:
+      - step:
+          name: 'Comprehensive Security and Performance Audit'
+          image: python:3.11
+          script:
+            - echo "🎯 Starting comprehensive security and performance audit..."
+            - pip install -r requirements.txt
+            
+            # Generate comprehensive audit report
+            - python scripts/generate_comprehensive_audit_report.py \
+              --security-reports security-reports/ \
+              --performance-reports performance-reports/ \
+              --compliance-reports compliance-reports/ \
+              --risk-reports risk-reports/ \
+              --output comprehensive-audit-report.json
+          artifacts:
+            - comprehensive-audit-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Comprehensive security and performance audit completed'
+
+# Branch-specific pipelines
+  branches:
+    main:
+      - step:
+          name: 'Security and Performance Audit - Production'
+          image: python:3.11
+          deployment: production
+          script:
+            - echo "🔒 Production security and performance audit..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting production security and performance audit'
+
+    develop:
+      - step:
+          name: 'Security and Performance Audit - Staging'
+          image: python:3.11
+          deployment: staging
+          script:
+            - echo "🔒 Staging security and performance audit..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting staging security and performance audit'
+
+# Pull request pipelines
+  pull-requests:
+    - step:
+        name: 'Security and Performance Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        script:
+          - echo "🧪 Testing security and performance changes..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Testing security and performance changes for PR #$BITBUCKET_PR_ID'
+
+# Scheduled pipelines
+  schedules:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+      step:
+        name: 'Weekly Security Audit'
+        image: python:3.11
+        script:
+          - echo "🔒 Weekly security audit..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting weekly security audit'
+
+    - cron: '0 3 * * *'  # Daily at 3 AM
+      step:
+        name: 'Daily Performance Check'
+        image: python:3.11
+        script:
+          - echo "⚡ Daily performance check..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily performance check'
+
+    - cron: '0 4 * * 0'  # Weekly on Sunday at 4 AM
+      step:
+        name: 'Weekly Russian Cloud Audit'
+        image: python:3.11
+        script:
+          - echo "☁️ Weekly Russian Cloud audit..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting weekly Russian Cloud audit'
+
+# Definitions for reusable steps and scripts
+definitions:
+  caches:
+    python:
+      key: python-$BITBUCKET_COMMIT
+      paths:
+        - .cache/pip/
+    flutter:
+      key: flutter-$BITBUCKET_COMMIT
+      paths:
+        - .flutter/
+        - .pub-cache/
+    node:
+      key: node-$BITBUCKET_COMMIT
+      paths:
+        - node_modules/
+
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: space_invaders_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+    redis:
+      image: redis:7
+
+  scripts:
+    - &setup-services |
+      echo "Setting up services..."
+      until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+      until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    - &setup-database |
+      echo "Setting up database..."
+      export DATABASE_URL="postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+      export REDIS_URL="redis://redis:6379"
+    - &start-api |
+      echo "Starting API server..."
+      export DATABASE_URL=$DATABASE_URL
+      export REDIS_URL=$REDIS_URL
+      uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+      sleep 10
+    - &notify-slack |
+      pipe: atlassian/slack-notify:0.3.0
+        variables:
+          WEBHOOK_URL: $SLACK_WEBHOOK_URL
+          MESSAGE: '$BITBUCKET_PIPELINE_STATE: $BITBUCKET_COMMIT'
+
+  steps:
+    - step: &security-analysis
+        name: 'Security Analysis'
+        image: python:3.11
+        script:
+          - pip install bandit safety semgrep
+          - npm install -g audit-ci snyk
+          - flutter pub get
+          - bandit -r . -f json -o bandit-report.json
+          - safety check --json --output safety-report.json
+          - semgrep --config=auto --json --output=semgrep-report.json .
+          - snyk test --json --output-file=snyk-report.json || true
+          - npm audit --json > npm-audit-report.json || true
+          - flutter analyze --format=json > flutter-analysis.json || true
+        artifacts:
+          - bandit-report.json
+          - safety-report.json
+          - semgrep-report.json
+          - snyk-report.json
+          - npm-audit-report.json
+          - flutter-analysis.json
+        after-script:
+          - *notify-slack
+
+    - step: &performance-testing
+        name: 'Performance Testing'
+        image: python:3.11
+        services:
+          - postgres
+          - redis
+        script:
+          - pip install py-spy memory-profiler
+          - pip install psycopg2-binary sqlalchemy
+          - pip install pytest pytest-asyncio
+          - pip install httpx fastapi uvicorn
+          - pip install locust
+          - pip install -r requirements.txt
+          - npm install -g lighthouse-cli webpack-bundle-analyzer
+          - flutter pub get
+          - *setup-services
+          - *setup-database
+          - *start-api
+          - python -m py-spy top --output python-profile.svg --duration 30 python scripts/sample_backend.py &
+          - sleep 35
+          - python -m memory_profiler scripts/memory_intensive_task.py > memory-profile.txt
+          - locust -f tests/performance/api/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host http://localhost:8000 --html api-load-test-report.html --csv api-load-test-results.csv
+          - flutter build web --profile --web-renderer canvaskit
+          - cd build/web && python -m http.server 8080 &
+          - sleep 5
+          - lighthouse http://localhost:8080 --output=json --output-path=lighthouse-report.json --chrome-flags="--headless"
+          - webpack-bundle-analyzer build/web/main.dart.js --mode=json --output=bundle-analysis.json
+        artifacts:
+          - python-profile.svg
+          - memory-profile.txt
+          - api-load-test-report.html
+          - api-load-test-results.csv
+          - lighthouse-report.json
+          - bundle-analysis.json
+        services:
+          - postgres
+          - redis
+        after-script:
+          - *notify-slack
+
+    - step: &compliance-audit
+        name: 'Compliance Audit'
+        image: python:3.11
+        script:
+          - pip install -r requirements.txt
+          - python scripts/check_gdpr_compliance.py --output gdpr-compliance-report.json
+          - python scripts/check_russian_compliance.py --output russian-compliance-report.json
+          - python scripts/check_pci_dss_compliance.py --output pci-dss-compliance-report.json
+          - python scripts/check_iso27001_compliance.py --output iso27001-compliance-report.json
+          - python scripts/check_data_residency.py --output data-residency-report.json
+          - python scripts/check_privacy_policy.py --output privacy-policy-report.json
+        artifacts:
+          - gdpr-compliance-report.json
+          - russian-compliance-report.json
+          - pci-dss-compliance-report.json
+          - iso27001-compliance-report.json
+          - data-residency-report.json
+          - privacy-policy-report.json
+        after-script:
+          - *notify-slack

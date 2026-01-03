@@ -1,0 +1,549 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Community Management
+on:
+  issues:
+    types: [opened, closed, labeled, unlabeled, assigned, unassigned]
+  pull_request:
+    types: [opened, closed, ready_for_review, merged]
+  schedule:
+    - cron: '0 9 * * 1'  # Weekly community report
+
+jobs:
+  welcome-new-contributors:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if first-time contributor
+        uses: actions/github-script@v6
+        id: first-time
+        with:
+          script: |
+            const contributor = context.payload.sender.login;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // Check if this is the first contribution
+            const issues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              creator: contributor,
+              state: 'all'
+            });
+            
+            const pulls = await github.rest.pulls.list({
+              owner,
+              repo,
+              creator: contributor,
+              state: 'all'
+            });
+            
+            const isFirstTime = issues.data.length === 0 && pulls.data.length === 0;
+            console.log(`isFirstTime: ${isFirstTime}`);
+            
+            return isFirstTime;
+
+      - name: Welcome First-Time Contributor
+        if: steps.first-time.outputs.isFirstTime == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const contributor = context.payload.sender.login;
+            const issueNumber = context.issue.number;
+            const pullNumber = context.pullRequest?.number;
+            
+            const welcomeMessage = `
+            👋 Welcome to Space Invaders Enhanced Edition, @${contributor}!
+            
+            🎮 Thank you for your first contribution! We're excited to have you as part of our community.
+            
+            📚 Here are some resources to help you get started:
+            - [Contributing Guide](https://github.com/${{ context.repo.owner }}/${{ context.repo.repo }}/blob/main/CONTRIBUTING.md)
+            - [Code of Conduct](https://github.com/${{ context.repo.owner }}/${{ context.repo.repo }}/blob/main/CODE_OF_CONDUCT.md)
+            - [Development Documentation](https://docs.space-invaders.com)
+            
+            💡 Tips for contributing:
+            - Follow our coding standards and guidelines
+            - Write clear, descriptive commit messages
+            - Add tests for new features
+            - Update documentation when needed
+            
+            🤝 Don't hesitate to ask questions! We're here to help you succeed.
+            
+            🚀 Happy coding!
+            `;
+            
+            if (issueNumber) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: welcomeMessage
+              });
+            }
+            
+            if (pullNumber) {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullNumber,
+                body: welcomeMessage
+              });
+            }
+
+      - name: Add First-Time Contributor Label
+        if: steps.first-time.outputs.isFirstTime == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const pullNumber = context.pullRequest?.number;
+            
+            if (issueNumber) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: ['first-time-contributor']
+              });
+            }
+            
+            if (pullNumber) {
+              await github.rest.pulls.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pullNumber,
+                labels: ['first-time-contributor']
+              });
+            }
+
+  triage-issues:
+    if: github.event.action == 'opened' && github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const issueNumber = issue.number;
+            const title = issue.title.toLowerCase();
+            const body = issue.body.toLowerCase();
+            
+            // Auto-label based on title and body
+            const labels = [];
+            
+            // Bug detection
+            if (title.includes('bug') || title.includes('error') || title.includes('crash') || 
+                body.includes('bug') || body.includes('error') || body.includes('crash')) {
+              labels.push('bug');
+            }
+            
+            // Feature request detection
+            if (title.includes('feature') || title.includes('enhancement') || title.includes('add') ||
+                body.includes('feature') || body.includes('enhancement') || body.includes('add')) {
+              labels.push('enhancement');
+            }
+            
+            // Documentation detection
+            if (title.includes('documentation') || title.includes('docs') || title.includes('readme') ||
+                body.includes('documentation') || body.includes('docs') || body.includes('readme')) {
+              labels.push('documentation');
+            }
+            
+            // Performance detection
+            if (title.includes('performance') || title.includes('slow') || title.includes('lag') ||
+                body.includes('performance') || body.includes('slow') || body.includes('lag')) {
+              labels.push('performance');
+            }
+            
+            // Security detection
+            if (title.includes('security') || title.includes('vulnerability') || title.includes('auth') ||
+                body.includes('security') || body.includes('vulnerability') || body.includes('auth')) {
+              labels.push('security');
+            }
+            
+            // Platform detection
+            if (title.includes('web') || body.includes('web')) {
+              labels.push('platform/web');
+            }
+            if (title.includes('android') || body.includes('android')) {
+              labels.push('platform/android');
+            }
+            if (title.includes('ios') || body.includes('ios')) {
+              labels.push('platform/ios');
+            }
+            if (title.includes('windows') || body.includes('windows')) {
+              labels.push('platform/windows');
+            }
+            
+            // Priority detection
+            if (title.includes('critical') || title.includes('urgent') || title.includes('blocker') ||
+                body.includes('critical') || body.includes('urgent') || body.includes('blocker')) {
+              labels.push('priority/critical');
+            }
+            
+            // Add labels if any detected
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                labels: labels
+              });
+            }
+            
+            // Add status/new label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['status/new']
+            });
+
+  auto-assign-issues:
+    if: github.event.action == 'opened' && github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Auto-assign Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const issueNumber = issue.number;
+            const labels = issue.labels.map(label => label.name);
+            
+            // Auto-assign based on labels
+            let assignees = [];
+            
+            // Security issues go to security team
+            if (labels.includes('security')) {
+              assignees.push('security-lead', 'security-engineer');
+            }
+            
+            // Performance issues go to performance team
+            if (labels.includes('performance')) {
+              assignees.push('performance-lead');
+            }
+            
+            // Documentation issues go to docs team
+            if (labels.includes('documentation')) {
+              assignees.push('docs-lead');
+            }
+            
+            // Platform-specific issues
+            if (labels.includes('platform/web')) {
+              assignees.push('web-lead');
+            }
+            if (labels.includes('platform/android')) {
+              assignees.push('android-lead');
+            }
+            if (labels.includes('platform/ios')) {
+              assignees.push('ios-lead');
+            }
+            if (labels.includes('platform/windows')) {
+              assignees.push('windows-lead');
+            }
+            
+            // Critical issues go to maintainers
+            if (labels.includes('priority/critical')) {
+              assignees.push('maintainer-1', 'maintainer-2');
+            }
+            
+            // Remove duplicates
+            assignees = [...new Set(assignees)];
+            
+            // Assign if any assignees found
+            if (assignees.length > 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                assignees: assignees
+              });
+            }
+
+  update-project-board:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add to Project Board
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const pullNumber = context.pullRequest?.number;
+            const labels = context.payload.labels?.map(label => label.name) || [];
+            
+            // Determine which column to add to
+            let columnId = '';
+            
+            if (labels.includes('bug')) {
+              columnId = 'COLUMN_ID_FOR_BUGS';
+            } else if (labels.includes('enhancement')) {
+              columnId = 'COLUMN_ID_FOR_FEATURES';
+            } else if (labels.includes('documentation')) {
+              columnId = 'COLUMN_ID_FOR_DOCS';
+            } else if (labels.includes('security')) {
+              columnId = 'COLUMN_ID_FOR_SECURITY';
+            } else {
+              columnId = 'COLUMN_ID_FOR_BACKLOG';
+            }
+            
+            // Add to project board
+            if (issueNumber) {
+              await github.rest.projects.createCard({
+                project_id: 'PROJECT_ID',
+                column_id: columnId,
+                content_id: context.issue.node_id,
+                content_type: 'Issue'
+              });
+            }
+            
+            if (pullNumber) {
+              await github.rest.projects.createCard({
+                project_id: 'PROJECT_ID',
+                column_id: columnId,
+                content_id: context.pullRequest.node_id,
+                content_type: 'PullRequest'
+              });
+            }
+
+  weekly-community-report:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate Weekly Report
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // Get statistics
+            const issues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'all',
+              per_page: 100
+            });
+            
+            const pulls = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'all',
+              per_page: 100
+            });
+            
+            const contributors = await github.rest.repos.listContributors({
+              owner,
+              repo
+            });
+            
+            // Calculate statistics
+            const openIssues = issues.data.filter(issue => issue.state === 'open').length;
+            const closedIssues = issues.data.filter(issue => issue.state === 'closed').length;
+            const openPulls = pulls.data.filter(pr => pr.state === 'open').length;
+            const mergedPulls = pulls.data.filter(pr => pr.state === 'closed' && pr.merged).length;
+            const totalContributors = contributors.data.length;
+            
+            // Get new contributors this week
+            const oneWeekAgo = new Date();
+            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+            
+            const newContributors = contributors.data.filter(contributor => {
+              return new Date(contributor.created_at) > oneWeekAgo;
+            });
+            
+            // Generate report
+            const report = `
+            # 📊 Community Report - ${new Date().toLocaleDateString()}
+            
+            ## 📈 Statistics
+            - **Open Issues**: ${openIssues}
+            - **Closed Issues**: ${closedIssues}
+            - **Open Pull Requests**: ${openPulls}
+            - **Merged Pull Requests**: ${mergedPulls}
+            - **Total Contributors**: ${totalContributors}
+            - **New Contributors This Week**: ${newContributors.length}
+            
+            ## 👥 New Contributors This Week
+            ${newContributors.map(contributor => `- @${contributor.login}`).join('\n')}
+            
+            ## 🎯 Top Contributors
+            ${contributors.data.slice(0, 10).map(contributor => 
+              `- @${contributor.login}: ${contributor.contributions} contributions`
+            ).join('\n')}
+            
+            ## 🔥 Hot Issues
+            ${issues.data
+              .filter(issue => issue.state === 'open')
+              .sort((a, b) => b.comments - a.comments)
+              .slice(0, 5)
+              .map(issue => `- #${issue.number}: ${issue.title} (${issue.comments} comments)`)
+              .join('\n')}
+            
+            ## 🚀 Recent Pull Requests
+            ${pulls.data
+              .slice(0, 5)
+              .map(pr => `- #${pr.number}: ${pr.title} (@${pr.user.login})`)
+              .join('\n')}
+            
+            ---
+            *Report generated automatically on ${new Date().toISOString()}*
+            `;
+            
+            // Create issue for report
+            await github.rest.issues.create({
+              owner,
+              repo,
+              title: `📊 Community Report - ${new Date().toLocaleDateString()}`,
+              body: report,
+              labels: ['community-report', 'automated']
+            });
+
+  celebrate-milestones:
+    if: github.event.action == 'closed' && github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Milestone
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const milestone = issue.milestone;
+            
+            if (milestone && milestone.state === 'open') {
+              // Check if all issues in milestone are closed
+              const issues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                milestone: milestone.number,
+                state: 'all'
+              });
+              
+              const openIssues = issues.data.filter(issue => issue.state === 'open');
+              
+              if (openIssues.length === 0) {
+                // Close milestone and celebrate
+                await github.rest.milestones.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  milestone_number: milestone.number,
+                  state: 'closed'
+                });
+                
+                // Create celebration issue
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🎉 Milestone Completed: ${milestone.title}`,
+                  body: `
+                  🎉 Congratulations! We've successfully completed the milestone: **${milestone.title}**
+                  
+                  ## 📊 Milestone Statistics
+                  - **Total Issues**: ${issues.data.length}
+                  - **Closed Issues**: ${issues.data.filter(issue => issue.state === 'closed').length}
+                  - **Completion Date**: ${new Date().toLocaleDateString()}
+                  
+                  ## 🙏 Contributors
+                  ${[...new Set(issues.data.map(issue => issue.user.login))].map(login => `- @${login}`).join('\n')}
+                  
+                  ## 🚀 Next Steps
+                  - Review and celebrate achievements
+                  - Plan next milestone
+                  - Update documentation
+                  - Share success with community
+                  
+                  ---
+                  *This issue was automatically created when the milestone was completed.*
+                  `,
+                  labels: ['milestone-completed', 'celebration', 'automated']
+                });
+              }
+            }
+
+  community-recognition:
+    if: github.event.action == 'closed' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recognize Contributors
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            const author = pull.user.login;
+            const merged = pull.merged;
+            
+            if (merged) {
+              // Check contribution statistics
+              const contributorStats = await github.rest.repos.getContributorStats({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: author
+              });
+              
+              const totalContributions = contributorStats.total;
+              
+              // Check for milestones
+              let milestoneMessage = '';
+              if (pull.milestone) {
+                milestoneMessage = `This PR contributed to the **${pull.milestone.title}** milestone!`;
+              }
+              
+              // Create recognition message
+              const recognitionMessage = `
+              🎉 **Congratulations @${author}!**
+              
+              Your pull request **#${pull.number}** has been successfully merged!
+              
+              ${milestoneMessage}
+              
+              ## 📊 Contribution Statistics
+              - **Total Contributions**: ${totalContributions}
+              - **Files Changed**: ${pull.changed_files}
+              - **Lines Added**: ${pull.additions}
+              - **Lines Removed**: ${pull.deletions}
+              
+              ## 🏆 Recognition
+              Your contribution helps make Space Invaders Enhanced Edition better for everyone!
+              
+              ## 🌟 Next Steps
+              - Consider contributing to another issue
+              - Help review other pull requests
+              - Share your experience with the community
+              - Become a regular contributor!
+              
+              ---
+              *This message was automatically generated when your PR was merged.*
+              `;
+              
+              // Add comment to PR
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pull.number,
+                body: recognitionMessage
+              });
+              
+              // Check for special achievements
+              if (totalContributions === 10) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🏆 Achievement Unlocked: @${author} reached 10 contributions!`,
+                  body: `🏆 **Congratulations @${author}!**\n\nYou've reached **10 contributions** to Space Invaders Enhanced Edition!\n\nThis is a significant milestone that shows your dedication to the project. Thank you for your valuable contributions!`,
+                  labels: ['achievement', '10-contributions', 'celebration']
+                });
+              }
+              
+              if (totalContributions === 50) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🏆 Achievement Unlocked: @${author} reached 50 contributions!`,
+                  body: `🏆 **Congratulations @${author}!**\n\nYou've reached **50 contributions** to Space Invaders Enhanced Edition!\n\nThis is an incredible milestone that shows your exceptional dedication to the project. You're a true champion of open source!`,
+                  labels: ['achievement', '50-contributions', 'celebration']
+                });
+              }
+            }

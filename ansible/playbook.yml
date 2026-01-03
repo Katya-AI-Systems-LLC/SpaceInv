@@ -1,0 +1,197 @@
+# Ansible Playbook for Space Invaders Deployment
+
+---
+- name: Deploy Space Invaders Enhanced Edition
+  hosts: all
+  become: yes
+  vars:
+    app_name: space-invaders
+    app_version: "2.0.0"
+    app_port: 8080
+    domain: space-invaders.com
+    ssl_cert_path: /etc/ssl/certs
+    ssl_key_path: /etc/ssl/private
+    
+  tasks:
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+      when: ansible_os_family == "Debian"
+    
+    - name: Install required packages
+      package:
+        name:
+          - nginx
+          - docker.io
+          - docker-compose
+          - certbot
+          - python3-certbot-nginx
+        state: present
+    
+    - name: Start and enable Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+    
+    - name: Create application directory
+      file:
+        path: "/opt/{{ app_name }}"
+        state: directory
+        mode: '0755'
+    
+    - name: Copy application files
+      copy:
+        src: "./"
+        dest: "/opt/{{ app_name }}/"
+        mode: '0644'
+    
+    - name: Build Docker image
+      docker_image:
+        name: "{{ app_name }}:{{ app_version }}"
+        build:
+          path: "/opt/{{ app_name }}"
+          pull: yes
+        source: build
+    
+    - name: Create docker-compose.yml
+      template:
+        src: docker-compose.yml.j2
+        dest: "/opt/{{ app_name }}/docker-compose.yml"
+        mode: '0644'
+    
+    - name: Start application with Docker Compose
+      docker_compose:
+        project_src: "/opt/{{ app_name }}"
+        state: present
+    
+    - name: Configure Nginx
+      template:
+        src: nginx.conf.j2
+        dest: "/etc/nginx/sites-available/{{ app_name }}"
+        mode: '0644'
+    
+    - name: Enable Nginx site
+      file:
+        src: "/etc/nginx/sites-available/{{ app_name }}"
+        dest: "/etc/nginx/sites-enabled/{{ app_name }}"
+        state: link
+    
+    - name: Remove default Nginx site
+      file:
+        path: "/etc/nginx/sites-enabled/default"
+        state: absent
+    
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+    
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted
+      when: nginx_test.rc == 0
+    
+    - name: Generate SSL certificate
+      command: |
+        certbot --nginx -d {{ domain }} --non-interactive --agree-tos --email admin@{{ domain }}
+      args:
+        creates: "{{ ssl_cert_path }}/{{ domain }}.pem"
+    
+    - name: Setup SSL renewal cron job
+      cron:
+        name: "Renew SSL certificate"
+        job: "certbot renew --quiet --nginx"
+        minute: "0"
+        hour: "3"
+        day: "1"
+        month: "*"
+    
+    - name: Setup log rotation
+      template:
+        src: logrotate.j2
+        dest: "/etc/logrotate.d/{{ app_name }}"
+        mode: '0644'
+    
+    - name: Create monitoring script
+      template:
+        src: monitor.sh.j2
+        dest: "/opt/{{ app_name }}/monitor.sh"
+        mode: '0755'
+    
+    - name: Setup monitoring cron job
+      cron:
+        name: "Monitor {{ app_name }}"
+        job: "/opt/{{ app_name }}/monitor.sh"
+        minute: "*/5"
+    
+    - name: Create backup script
+      template:
+        src: backup.sh.j2
+        dest: "/opt/{{ app_name }}/backup.sh"
+        mode: '0755'
+    
+    - name: Setup backup cron job
+      cron:
+        name: "Backup {{ app_name }}"
+        job: "/opt/{{ app_name }}/backup.sh"
+        minute: "0"
+        hour: "2"
+        day: "*"
+    
+    - name: Create health check script
+      template:
+        src: health-check.sh.j2
+        dest: "/opt/{{ app_name }}/health-check.sh"
+        mode: '0755'
+    
+    - name: Setup firewall rules
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - 22
+        - 80
+        - 443
+        - "{{ app_port }}"
+    
+    - name: Enable firewall
+      ufw:
+        state: enabled
+        policy: deny
+    
+    - name: Create systemd service
+      template:
+        src: space-invaders.service.j2
+        dest: "/etc/systemd/system/{{ app_name }}.service"
+        mode: '0644'
+    
+    - name: Reload systemd
+      command: systemctl daemon-reload
+    
+    - name: Enable and start service
+      systemd:
+        name: "{{ app_name }}"
+        enabled: yes
+        state: started
+    
+    - name: Verify deployment
+      uri:
+        url: "http://localhost:{{ app_port }}/health"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+    
+    - name: Send deployment notification
+      uri:
+        url: "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage"
+        method: POST
+        body_format: json
+        body:
+          chat_id: "{{ telegram_chat_id }}"
+          text: "✅ Space Invaders v{{ app_version }} deployed successfully to {{ domain }}"
+      when: telegram_bot_token is defined and telegram_chat_id is defined

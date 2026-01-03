@@ -1,0 +1,736 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Security Audit and Compliance
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'security/**'
+      - 'compliance/**'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'security/**'
+      - 'compliance/**'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+  workflow_dispatch:
+    inputs:
+      audit_type:
+        description: 'Type of security audit to perform'
+        required: true
+        type: choice
+        options:
+          - 'comprehensive'
+          - 'vulnerability_scan'
+          - 'code_review'
+          - 'infrastructure_audit'
+          - 'compliance_check'
+          - 'penetration_test'
+          - 'risk_assessment'
+          - 'all'
+      scope:
+        description: 'Audit scope'
+        required: true
+        type: choice
+        options:
+          - 'full'
+          - 'application'
+          - 'infrastructure'
+          - 'database'
+          - 'api'
+          - 'frontend'
+          - 'backend'
+          - 'cloud'
+
+jobs:
+  security-code-analysis:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'code_review' || github.event.inputs.audit_type == 'all' || github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety semgrep
+          npm install -g audit-ci snyk
+          flutter pub get
+
+      - name: Run Bandit security scan
+        run: |
+          bandit -r . -f json -o bandit-report.json
+          bandit -r . -f html -o bandit-report.html
+
+      - name: Run Safety dependency check
+        run: |
+          safety check --json --output safety-report.json
+          safety check --html --output safety-report.html
+
+      - name: Run Semgrep security scan
+        run: |
+          semgrep --config=auto --json --output=semgrep-report.json .
+          semgrep --config=auto --html --output=semgrep-report.html .
+
+      - name: Run Snyk vulnerability scan
+        run: |
+          snyk test --json --output-file=snyk-report.json || true
+          snyk test --json --output-file-v2=snyk-report-v2.json || true
+
+      - name: Run npm audit
+        run: |
+          npm audit --json > npm-audit-report.json || true
+          npm audit --audit-level moderate
+
+      - name: Run Flutter security analysis
+        run: |
+          flutter analyze --format=json > flutter-analysis.json || true
+          flutter analyze
+
+      - name: Generate security report
+        run: |
+          python scripts/generate_security_report.py \
+            --bandit bandit-report.json \
+            --safety safety-report.json \
+            --semgrep semgrep-report.json \
+            --snyk snyk-report.json \
+            --npm npm-audit-report.json \
+            --flutter flutter-analysis.json \
+            --output comprehensive-security-report.json
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-analysis-reports
+          path: |
+            bandit-report.json
+            bandit-report.html
+            safety-report.json
+            safety-report.html
+            semgrep-report.json
+            semgrep-report.html
+            snyk-report.json
+            snyk-report-v2.json
+            npm-audit-report.json
+            flutter-analysis.json
+            comprehensive-security-report.json
+
+  infrastructure-security-audit:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'infrastructure_audit' || github.event.inputs.audit_type == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install security tools
+        run: |
+          pip install tfsec checkov
+          npm install -g @aquasecurity/trivy
+
+      - name: Run Terraform security scan
+        run: |
+          terraform init
+          tfsec . --format=json --out=tfsec-report.json
+          tfsec . --format=html --out=tfsec-report.html
+
+      - name: Run Checkov infrastructure scan
+        run: |
+          checkov --directory . --framework terraform --output json --output-file-path checkov-report.json
+          checkov --directory . --framework terraform --output cli --output-file-path checkov-report.txt
+
+      - name: Run Trivy container scan
+        run: |
+          trivy image --format json --output trivy-container-report.json space-invaders:latest || true
+          trivy image --format table space-invaders:latest || true
+
+      - name: Run Trivy filesystem scan
+        run: |
+          trivy fs --format json --output trivy-fs-report.json .
+          trivy fs --format table .
+
+      - name: Generate infrastructure security report
+        run: |
+          python scripts/generate_infrastructure_security_report.py \
+            --tfsec tfsec-report.json \
+            --checkov checkov-report.json \
+            --trivy-container trivy-container-report.json \
+            --trivy-fs trivy-fs-report.json \
+            --output infrastructure-security-report.json
+
+      - name: Upload infrastructure reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-security-reports
+          path: |
+            tfsec-report.json
+            tfsec-report.html
+            checkov-report.json
+            checkov-report.txt
+            trivy-container-report.json
+            trivy-fs-report.json
+            infrastructure-security-report.json
+
+  api-security-testing:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'penetration_test' || github.event.inputs.audit_type == 'all' || github.event_name == 'schedule'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install security testing tools
+        run: |
+          pip install pytest pytest-asyncio
+          pip install httpx
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run OWASP ZAP security scan
+        run: |
+          docker run -t owasp/zap2docker-stable zap-baseline.py \
+            -t http://localhost:8000 \
+            -J zap-report.json \
+            -I zap-report.html || true
+
+      - name: Run API security tests
+        run: |
+          pytest tests/security/api/ \
+            --junitxml=api-security-results.xml \
+            --tb=short
+
+      - name: Run authentication security tests
+        run: |
+          pytest tests/security/auth/ \
+            --junitxml=auth-security-results.xml \
+            --tb=short
+
+      - name: Run authorization security tests
+        run: |
+          pytest tests/security/authz/ \
+            --junitxml=authz-security-results.xml \
+            --tb=short
+
+      - name: Run input validation tests
+        run: |
+          pytest tests/security/input-validation/ \
+            --junitxml=input-validation-results.xml \
+            --tb=short
+
+      - name: Generate API security report
+        run: |
+          python scripts/generate_api_security_report.py \
+            --zap zap-report.json \
+            --api-tests api-security-results.xml \
+            --auth-tests auth-security-results.xml \
+            --authz-tests authz-security-results.xml \
+            --input-tests input-validation-results.xml \
+            --output api-security-report.json
+
+      - name: Upload API security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-security-reports
+          path: |
+            zap-report.json
+            zap-report.html
+            api-security-results.xml
+            auth-security-results.xml
+            authz-security-results.xml
+            input-validation-results.xml
+            api-security-report.json
+
+  compliance-audit:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'compliance_check' || github.event.inputs.audit_type == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install compliance tools
+        run: |
+          pip install compliance-checker
+          pip install -r requirements.txt
+
+      - name: Run GDPR compliance check
+        run: |
+          python scripts/check_gdpr_compliance.py \
+            --output gdpr-compliance-report.json
+
+      - name: Run Russian Federal Law #152-FZ compliance check
+        run: |
+          python scripts/check_russian_compliance.py \
+            --output russian-compliance-report.json
+
+      - name: Run PCI DSS compliance check
+        run: |
+          python scripts/check_pci_dss_compliance.py \
+            --output pci-dss-compliance-report.json
+
+      - name: Run ISO 27001 compliance check
+        run: |
+          python scripts/check_iso27001_compliance.py \
+            --output iso27001-compliance-report.json
+
+      - name: Run data residency check
+        run: |
+          python scripts/check_data_residency.py \
+            --output data-residency-report.json
+
+      - name: Run privacy policy compliance check
+        run: |
+          python scripts/check_privacy_policy.py \
+            --output privacy-policy-report.json
+
+      - name: Generate compliance report
+        run: |
+          python scripts/generate_compliance_report.py \
+            --gdpr gdpr-compliance-report.json \
+            --russian russian-compliance-report.json \
+            --pci-dss pci-dss-compliance-report.json \
+            --iso27001 iso27001-compliance-report.json \
+            --data-residency data-residency-report.json \
+            --privacy privacy-policy-report.json \
+            --output comprehensive-compliance-report.json
+
+      - name: Upload compliance reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-reports
+          path: |
+            gdpr-compliance-report.json
+            russian-compliance-report.json
+            pci-dss-compliance-report.json
+            iso27001-compliance-report.json
+            data-residency-report.json
+            privacy-policy-report.json
+            comprehensive-compliance-report.json
+
+  penetration-testing:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'penetration_test' || github.event.inputs.audit_type == 'all'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install penetration testing tools
+        run: |
+          pip install pytest pytest-asyncio
+          pip install httpx
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Start application
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run SQL injection tests
+        run: |
+          pytest tests/penetration/sql-injection/ \
+            --junitxml=sql-injection-results.xml \
+            --tb=short
+
+      - name: Run XSS tests
+        run: |
+          pytest tests/penetration/xss/ \
+            --junitxml=xss-results.xml \
+            --tb=short
+
+      - name: Run CSRF tests
+        run: |
+          pytest tests/penetration/csrf/ \
+            --junitxml=csrf-results.xml \
+            --tb=short
+
+      - name: Run authentication bypass tests
+        run: |
+          pytest tests/penetration/auth-bypass/ \
+            --junitxml=auth-bypass-results.xml \
+            --tb=short
+
+      - name: Run privilege escalation tests
+        run: |
+          pytest tests/penetration/privilege-escalation/ \
+            --junitxml=privilege-escalation-results.xml \
+            --tb=short
+
+      - name: Run data exposure tests
+        run: |
+          pytest tests/penetration/data-exposure/ \
+            --junitxml=data-exposure-results.xml \
+            --tb=short
+
+      - name: Generate penetration testing report
+        run: |
+          python scripts/generate_penetration_report.py \
+            --sql-injection sql-injection-results.xml \
+            --xss xss-results.xml \
+            --csrf csrf-results.xml \
+            --auth-bypass auth-bypass-results.xml \
+            --privilege-escalation privilege-escalation-results.xml \
+            --data-exposure data-exposure-results.xml \
+            --output penetration-testing-report.json
+
+      - name: Upload penetration testing reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: penetration-testing-reports
+          path: |
+            sql-injection-results.xml
+            xss-results.xml
+            csrf-results.xml
+            auth-bypass-results.xml
+            privilege-escalation-results.xml
+            data-exposure-results.xml
+            penetration-testing-report.json
+
+  risk-assessment:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'risk_assessment' || github.event.inputs.audit_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install risk assessment tools
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run security risk assessment
+        run: |
+          python scripts/assess_security_risk.py \
+            --output security-risk-assessment.json
+
+      - name: Run operational risk assessment
+        run: |
+          python scripts/assess_operational_risk.py \
+            --output operational-risk-assessment.json
+
+      - name: Run financial risk assessment
+        run: |
+          python scripts/assess_financial_risk.py \
+            --output financial-risk-assessment.json
+
+      - name: Run compliance risk assessment
+        run: |
+          python scripts/assess_compliance_risk.py \
+            --output compliance-risk-assessment.json
+
+      - name: Generate risk assessment report
+        run: |
+          python scripts/generate_risk_assessment_report.py \
+            --security security-risk-assessment.json \
+            --operational operational-risk-assessment.json \
+            --financial financial-risk-assessment.json \
+            --compliance compliance-risk-assessment.json \
+            --output comprehensive-risk-assessment.json
+
+      - name: Upload risk assessment reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: risk-assessment-reports
+          path: |
+            security-risk-assessment.json
+            operational-risk-assessment.json
+            financial-risk-assessment.json
+            compliance-risk-assessment.json
+            comprehensive-risk-assessment.json
+
+  russian-cloud-security-audit:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.audit_type == 'comprehensive' || github.event.inputs.audit_type == 'infrastructure_audit' || github.event.inputs.audit_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Russian cloud security tools
+        run: |
+          pip install -r requirements.txt
+
+      - name: Audit Yandex Cloud security
+        run: |
+          python scripts/audit_yandex_cloud_security.py \
+            --output yandex-cloud-security-report.json
+
+      - name: Audit VK Cloud security
+        run: |
+          python scripts/audit_vk_cloud_security.py \
+            --output vk-cloud-security-report.json
+
+      - name: Audit Selectel security
+        run: |
+          python scripts/audit_selectel_security.py \
+            --output selectel-security-report.json
+
+      - name: Check Russian data residency compliance
+        run: |
+          python scripts/check_russian_data_residency.py \
+            --output russian-data-residency-report.json
+
+      - name: Generate Russian cloud security report
+        run: |
+          python scripts/generate_russian_cloud_security_report.py \
+            --yandex yandex-cloud-security-report.json \
+            --vk vk-cloud-security-report.json \
+            --selectel selectel-security-report.json \
+            --data-residency russian-data-residency-report.json \
+            --output russian-cloud-security-report.json
+
+      - name: Upload Russian cloud security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: russian-cloud-security-reports
+          path: |
+            yandex-cloud-security-report.json
+            vk-cloud-security-report.json
+            selectel-security-report.json
+            russian-data-residency-report.json
+            russian-cloud-security-report.json
+
+  comprehensive-security-report:
+    needs: [security-code-analysis, infrastructure-security-audit, api-security-testing, compliance-audit, penetration-testing, risk-assessment, russian-cloud-security-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: security-reports
+
+      - name: Generate comprehensive security report
+        run: |
+          python scripts/generate_comprehensive_security_report.py \
+            --input-dir security-reports \
+            --output comprehensive-security-audit-report.json
+
+      - name: Upload comprehensive security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-security-report
+          path: comprehensive-security-audit-report.json
+
+  notify-security-team:
+    needs: [comprehensive-security-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-security-report
+          path: report
+
+      - name: Notify security team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.SECURITY_WEBHOOK_URL;
+            const auditType = '${{ github.event.inputs.audit_type || 'scheduled' }}';
+            const scope = '${{ github.event.inputs.scope || 'full' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔒 Security Audit Completed: ${auditType}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Audit Type',
+                      value: auditType,
+                      short: true
+                    }, {
+                      title: 'Scope',
+                      value: scope,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-security-dashboard:
+    needs: [comprehensive-security-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-security-report
+          path: report
+
+      - name: Update security dashboard
+        run: |
+          echo "Updating security dashboard with latest audit results..."
+          # Add dashboard update logic here
+
+      - name: Update security metrics
+        run: |
+          echo "Updating security metrics..."
+          # Add metrics update logic here
+
+  create-security-issues:
+    needs: [comprehensive-security-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-security-report
+          path: report
+
+      - name: Create security issues for critical findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('report/comprehensive-security-audit-report.json', 'utf8'));
+            
+            // Create issues for critical security findings
+            if (report.critical_findings && report.critical_findings.length > 0) {
+              for (const finding of report.critical_findings) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🔒 Critical Security Issue: ${finding.title}`,
+                  body: `## Critical Security Finding\n\n**Description**: ${finding.description}\n\n**Severity**: Critical\n\n**Location**: ${finding.location}\n\n**Recommendation**: ${finding.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['security', 'critical', 'automated-finding']
+                });
+              }
+            }
+
+  cleanup:
+    needs: [security-code-analysis, infrastructure-security-audit, api-security-testing, compliance-audit, penetration-testing, risk-assessment, russian-cloud-security-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup security artifacts
+        run: |
+          echo "Cleaning up security audit artifacts..."
+          # Add cleanup logic here

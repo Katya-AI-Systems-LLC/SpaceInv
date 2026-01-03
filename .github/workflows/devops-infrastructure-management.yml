@@ -1,0 +1,644 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: DevOps Infrastructure Management
+on:
+  push:
+    branches: [main, develop, infrastructure/*]
+    paths:
+      - 'infrastructure/**'
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'docker/**'
+      - 'kubernetes/**'
+      - 'monitoring/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'infrastructure/**'
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'docker/**'
+      - 'kubernetes/**'
+      - 'monitoring/**'
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM
+  workflow_dispatch:
+    inputs:
+      infrastructure_action:
+        description: 'Infrastructure action to perform'
+        required: true
+        type: choice
+        options:
+          - 'plan'
+          - 'apply'
+          - 'validate'
+          - 'test'
+          - 'monitor'
+          - 'backup'
+          - 'restore'
+          - 'cleanup'
+      target_environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'development'
+          - 'staging'
+          - 'production'
+          - 'monitoring'
+          - 'logging'
+      cloud_provider:
+        description: 'Cloud provider'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'yandex'
+          - 'vk'
+          - 'selectel'
+          - 'aws'
+          - 'gcp'
+          - 'azure'
+
+jobs:
+  infrastructure-validation:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'validate' || github.event.inputs.infrastructure_action == 'all' || github.event_name == 'push' || github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        tool: [terraform, ansible, docker, kubernetes]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        if: matrix.tool == 'terraform'
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Setup Ansible
+        if: matrix.tool == 'ansible'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Docker
+        if: matrix.tool == 'docker'
+        uses: docker/setup-buildx-action@v2
+
+      - name: Setup kubectl
+        if: matrix.tool == 'kubernetes'
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Validate Terraform configuration
+        if: matrix.tool == 'terraform'
+        run: |
+          terraform init -backend=false
+          terraform fmt -check -recursive
+          terraform validate
+          terraform plan -out=tfplan
+          terraform show -json tfplan > terraform-plan.json
+
+      - name: Validate Ansible playbooks
+        if: matrix.tool == 'ansible'
+        run: |
+          pip install ansible ansible-lint
+          ansible-lint ansible/
+          ansible-playbook --syntax-check ansible/*.yml
+          ansible-playbook --check ansible/*.yml
+
+      - name: Validate Docker configuration
+        if: matrix.tool == 'docker'
+        run: |
+          docker buildx bake --validate
+          docker compose config
+          docker compose config > docker-compose-config.json
+
+      - name: Validate Kubernetes manifests
+        if: matrix.tool == 'kubernetes'
+        run: |
+          kubectl apply --dry-run=client -f kubernetes/
+          kubeval kubernetes/
+          kube-score score kubernetes/ --output-format json > kubernetes-score.json
+
+      - name: Upload validation results
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-results-${{ matrix.tool }}
+          path: |
+            terraform-plan.json
+            docker-compose-config.json
+            kubernetes-score.json
+
+  infrastructure-planning:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'plan' || github.event.inputs.infrastructure_action == 'all'
+    strategy:
+      matrix:
+        environment: [development, staging, production]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install infrastructure tools
+        run: |
+          pip install terraform-docs
+          pip install -r requirements.txt
+
+      - name: Plan infrastructure changes
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform init
+          terraform plan -out=tfplan-${{ matrix.environment }}
+          terraform show -json tfplan-${{ matrix.environment }} > terraform-plan-${{ matrix.environment }}.json
+
+      - name: Generate infrastructure documentation
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform-docs . > infrastructure-docs-${{ matrix.environment }}.md
+
+      - name: Analyze infrastructure costs
+        run: |
+          python scripts/analyze_infrastructure_costs.py \
+            --environment "${{ matrix.environment }}" \
+            --plan-file terraform/environments/${{ matrix.environment }}/terraform-plan-${{ matrix.environment }}.json \
+            --output infrastructure-costs-${{ matrix.environment }}.json
+
+      - name: Generate infrastructure report
+        run: |
+          python scripts/generate_infrastructure_report.py \
+            --environment "${{ matrix.environment }}" \
+            --plan-file terraform/environments/${{ matrix.environment }}/terraform-plan-${{ matrix.environment }}.json \
+            --costs-file infrastructure-costs-${{ matrix.environment }}.json \
+            --output infrastructure-report-${{ matrix.environment }}.json
+
+      - name: Upload planning results
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-plan-${{ matrix.environment }}
+          path: |
+            terraform/environments/${{ matrix.environment }}/tfplan-${{ matrix.environment }}
+            terraform/environments/${{ matrix.environment }}/terraform-plan-${{ matrix.environment }}.json
+            terraform/environments/${{ matrix.environment }}/infrastructure-docs-${{ matrix.environment }}.md
+            infrastructure-costs-${{ matrix.environment }}.json
+            infrastructure-report-${{ matrix.environment }}.json
+
+  infrastructure-deployment:
+    needs: infrastructure-validation
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'apply' || github.event.inputs.infrastructure_action == 'all'
+    environment: ${{ matrix.environment }}
+    strategy:
+      matrix:
+        environment: [development, staging, production]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Setup Ansible
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Docker
+        uses: docker/setup-buildx-action@v2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure cloud credentials
+        run: |
+          if [ "${{ matrix.environment }}" = "production" ]; then
+            echo "Setting up production credentials..."
+            # Add production credential setup
+          elif [ "${{ matrix.environment }}" = "staging" ]; then
+            echo "Setting up staging credentials..."
+            # Add staging credential setup
+          else
+            echo "Setting up development credentials..."
+            # Add development credential setup
+          fi
+
+      - name: Deploy infrastructure with Terraform
+        run: |
+          cd terraform/environments/${{ matrix.environment }}
+          terraform init
+          terraform apply -auto-approve tfplan-${{ matrix.environment }}
+
+      - name: Deploy configurations with Ansible
+        run: |
+          cd ansible
+          ansible-playbook -i inventory/${{ matrix.environment }} playbook.yml
+
+      - name: Deploy Docker containers
+        run: |
+          cd docker
+          docker compose -f docker-compose.${{ matrix.environment }}.yml up -d
+
+      - name: Deploy Kubernetes manifests
+        run: |
+          cd kubernetes
+          kubectl apply -f manifests/${{ matrix.environment }}/
+
+      - name: Verify deployment
+        run: |
+          python scripts/verify_deployment.py \
+            --environment "${{ matrix.environment }}" \
+            --output deployment-verification-${{ matrix.environment }}.json
+
+      - name: Run post-deployment tests
+        run: |
+          python scripts/run_post_deployment_tests.py \
+            --environment "${{ matrix.environment }}" \
+            --output post-deployment-tests-${{ matrix.environment }}.json
+
+      - name: Upload deployment results
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-results-${{ matrix.environment }}
+          path: |
+            deployment-verification-${{ matrix.environment }}.json
+            post-deployment-tests-${{ matrix.environment }}.json
+
+  monitoring-setup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'monitor' || github.event.inputs.infrastructure_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup monitoring tools
+        run: |
+          pip install prometheus-client
+          pip install grafana-api
+          pip install -r requirements.txt
+
+      - name: Deploy monitoring stack
+        run: |
+          cd monitoring
+          docker compose up -d
+
+      - name: Configure Prometheus
+        run: |
+          python scripts/configure_prometheus.py \
+            --config-file monitoring/prometheus.yml \
+            --output prometheus-config.json
+
+      - name: Configure Grafana
+        run: |
+          python scripts/configure_grafana.py \
+            --config-file monitoring/grafana/dashboards/ \
+            --output grafana-config.json
+
+      - name: Setup alerting rules
+        run: |
+          python scripts/setup_alerting_rules.py \
+            --rules-file monitoring/alerting-rules.yml \
+            --output alerting-config.json
+
+      - name: Test monitoring setup
+        run: |
+          python scripts/test_monitoring_setup.py \
+            --output monitoring-test-results.json
+
+      - name: Upload monitoring configuration
+        uses: actions/upload-artifact@v3
+        with:
+          name: monitoring-setup
+          path: |
+            prometheus-config.json
+            grafana-config.json
+            alerting-config.json
+            monitoring-test-results.json
+
+  backup-infrastructure:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'backup' || github.event.inputs.infrastructure_action == 'all'
+    strategy:
+      matrix:
+        component: [databases, configurations, logs, metrics]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install backup tools
+        run: |
+          pip install boto3
+          pip install -r requirements.txt
+
+      - name: Backup ${{ matrix.component }}
+        run: |
+          python scripts/backup_infrastructure.py \
+            --component "${{ matrix.component }}" \
+            --environment "${{ github.event.inputs.target_environment || 'all' }}" \
+            --output backup-${{ matrix.component }}.json
+
+      - name: Verify backup integrity
+        run: |
+          python scripts/verify_backup_integrity.py \
+            --backup-file backup-${{ matrix.component }}.json \
+            --output backup-verification-${{ matrix.component }}.json
+
+      - name: Upload backup results
+        uses: actions/upload-artifact@v3
+        with:
+          name: backup-results-${{ matrix.component }}
+          path: |
+            backup-${{ matrix.component }}.json
+            backup-verification-${{ matrix.component }}.json
+
+  infrastructure-testing:
+    needs: infrastructure-deployment
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'test' || github.event.inputs.infrastructure_action == 'all'
+    strategy:
+      matrix:
+        test_type: [performance, security, reliability, scalability]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install testing tools
+        run: |
+          pip install locust
+          pip install pytest
+          pip install -r requirements.txt
+
+      - name: Run ${{ matrix.test_type }} tests
+        run: |
+          python scripts/run_infrastructure_tests.py \
+            --test-type "${{ matrix.test_type }}" \
+            --environment "${{ github.event.inputs.target_environment || 'staging' }}" \
+            --output infrastructure-test-${{ matrix.test_type }}.json
+
+      - name: Generate test report
+        run: |
+          python scripts/generate_infrastructure_test_report.py \
+            --test-type "${{ matrix.test_type }}" \
+            --test-results infrastructure-test-${{ matrix.test_type }}.json \
+            --output infrastructure-test-report-${{ matrix.test_type }}.json
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-test-results-${{ matrix.test_type }}
+          path: |
+            infrastructure-test-${{ matrix.test_type }}.json
+            infrastructure-test-report-${{ matrix.test_type }}.json
+
+  russian-cloud-management:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud_provider == 'all' || github.event.inputs.cloud_provider == 'yandex' || github.event.inputs.cloud_provider == 'vk' || github.event.inputs.cloud_provider == 'selectel'
+    strategy:
+      matrix:
+        provider: [yandex, vk, selectel]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install cloud management tools
+        run: |
+          pip install yandexcloud
+          pip install -r requirements.txt
+
+      - name: Configure ${{ matrix.provider }} credentials
+        run: |
+          python scripts/configure_${{ matrix.provider }}_credentials.py \
+            --environment "${{ github.event.inputs.target_environment || 'development' }}"
+
+      - name: Manage ${{ matrix.provider }} infrastructure
+        run: |
+          python scripts/manage_${{ matrix.provider }}_infrastructure.py \
+            --action "${{ github.event.inputs.infrastructure_action || 'plan' }}" \
+            --environment "${{ github.event.inputs.target_environment || 'development' }}" \
+            --output ${{ matrix.provider }}-infrastructure.json
+
+      - name: Verify ${{ matrix.provider }} setup
+        run: |
+          python scripts/verify_${{ matrix.provider }}_setup.py \
+            --output ${{ matrix.provider }}-verification.json
+
+      - name: Upload ${{ matrix.provider }} results
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.provider }}-cloud-management
+          path: |
+            ${{ matrix.provider }}-infrastructure.json
+            ${{ matrix.provider }}-verification.json
+
+  infrastructure-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.infrastructure_action == 'cleanup' || github.event.inputs.infrastructure_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install cleanup tools
+        run: |
+          pip install -r requirements.txt
+
+      - name: Cleanup unused resources
+        run: |
+          python scripts/cleanup_infrastructure.py \
+            --environment "${{ github.event.inputs.target_environment || 'development' }}" \
+            --dry-run false \
+            --output cleanup-results.json
+
+      - name: Verify cleanup
+        run: |
+          python scripts/verify_cleanup.py \
+            --cleanup-results cleanup-results.json \
+            --output cleanup-verification.json
+
+      - name: Upload cleanup results
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-cleanup
+          path: |
+            cleanup-results.json
+            cleanup-verification.json
+
+  comprehensive-infrastructure-report:
+    needs: [infrastructure-validation, infrastructure-planning, infrastructure-deployment, monitoring-setup, infrastructure-testing, russian-cloud-management]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all infrastructure reports
+        uses: actions/download-artifact@v3
+        with:
+          path: infrastructure-reports
+
+      - name: Generate comprehensive infrastructure report
+        run: |
+          python scripts/generate_comprehensive_infrastructure_report.py \
+            --input-dir infrastructure-reports \
+            --output comprehensive-infrastructure-report.json
+
+      - name: Upload comprehensive report
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-infrastructure-report
+          path: comprehensive-infrastructure-report.json
+
+  notify-devops-team:
+    needs: [comprehensive-infrastructure-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-infrastructure-report
+          path: report
+
+      - name: Notify DevOps team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.DEVOPS_WEBHOOK_URL;
+            const action = '${{ github.event.inputs.infrastructure_action || 'automated' }}';
+            const environment = '${{ github.event.inputs.target_environment || 'all' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔧 Infrastructure Management Completed: ${action}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Action',
+                      value: action,
+                      short: true
+                    }, {
+                      title: 'Environment',
+                      value: environment,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  create-infrastructure-issues:
+    needs: [comprehensive-infrastructure-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-infrastructure-report
+          path: report
+
+      - name: Create infrastructure issues for critical findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('report/comprehensive-infrastructure-report.json', 'utf8'));
+            
+            // Create issues for critical infrastructure findings
+            if (report.critical_issues && report.critical_issues.length > 0) {
+              for (const issue of report.critical_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🔧 Infrastructure Issue: ${issue.title}`,
+                  body: `## Infrastructure Issue\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**Component**: ${issue.component}\n\n**Environment**: ${issue.environment}\n\n**Impact**: ${issue.impact}\n\n**Recommendation**: ${issue.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['infrastructure', 'critical', 'devops']
+                });
+              }
+            }
+
+  update-infrastructure-dashboard:
+    needs: [comprehensive-infrastructure-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-infrastructure-report
+          path: report
+
+      - name: Update infrastructure dashboard
+        run: |
+          echo "Updating infrastructure dashboard with latest results..."
+          # Add dashboard update logic here
+
+      - name: Update infrastructure metrics
+        run: |
+          echo "Updating infrastructure metrics..."
+          # Add metrics update logic here
+
+  cleanup:
+    needs: [infrastructure-validation, infrastructure-planning, infrastructure-deployment, monitoring-setup, infrastructure-testing, russian-cloud-management]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup infrastructure artifacts
+        run: |
+          echo "Cleaning up infrastructure artifacts..."
+          # Add cleanup logic here

@@ -1,0 +1,161 @@
+# Kubernetes Deployment for Space Invaders Enhanced Edition
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: space-invaders
+  labels:
+    app: space-invaders
+    version: v2.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: space-invaders
+  template:
+    metadata:
+      labels:
+        app: space-invaders
+        version: v2.0.0
+    spec:
+      containers:
+      - name: space-invaders
+        image: space-invaders:latest
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        env:
+        - name: NODE_ENV
+          value: "production"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: space-invaders-service
+  labels:
+    app: space-invaders
+spec:
+  selector:
+    app: space-invaders
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: space-invaders-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  tls:
+  - hosts:
+    - space-invaders.com
+    secretName: space-invaders-tls
+  rules:
+  - host: space-invaders.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: space-invaders-service
+            port:
+              number: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+    
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+        
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_types text/plain text/css application/javascript application/json;
+        
+        server {
+            listen 80;
+            server_name localhost;
+            root /usr/share/nginx/html;
+            index index.html;
+            
+            location / {
+                try_files $uri $uri/ /index.html;
+            }
+            
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+        }
+    }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: space-invaders-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: space-invaders
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: space-invaders-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: space-invaders

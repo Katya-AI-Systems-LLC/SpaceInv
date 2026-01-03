@@ -1,0 +1,309 @@
+# Git Attributes Configuration for Space Invaders Project
+
+# Language detection
+*.dart linguist-language=Dart
+*.yaml linguist-language=YAML
+*.yml linguist-language=YAML
+*.json linguist-language=JSON
+*.md linguist-language=Markdown
+*.html linguist-language=HTML
+*.css linguist-language=CSS
+*.js linguist-language=JavaScript
+*.ts linguist-language=TypeScript
+*.sh linguist-language=Shell
+*.ps1 linguist-language=PowerShell
+
+# File handling
+* text=auto eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+
+# Large files - use Git LFS
+*.apk filter=lfs diff=lfs merge=lfs -text
+*.aab filter=lfs diff=lfs merge=lfs -text
+*.ipa filter=lfs diff=lfs merge=lfs -text
+*.dmg filter=lfs diff=lfs merge=lfs -text
+*.pkg filter=lfs diff=lfs merge=lfs -text
+*.deb filter=lfs diff=lfs merge=lfs -text
+*.rpm filter=lfs diff=lfs merge=lfs -text
+*.msi filter=lfs diff=lfs merge=lfs -text
+*.jar filter=lfs diff=lfs merge=lfs -text
+*.war filter=lfs diff=lfs merge=lfs -text
+*.ear filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+*.tar.bz2 filter=lfs diff=lfs merge=lfs -text
+*.tar.xz filter=lfs diff=lfs merge=lfs -text
+*.7z filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.rar filter=lfs diff=lfs merge=lfs -text
+
+# Flutter specific
+*.dart linguist-vendored
+*.dart linguist-generated=false
+*.dart linguist-documentation=false
+
+# Generated files
+*.g.dart linguist-generated=true
+*.freezed.dart linguist-generated=true
+*.mocks.dart linguist-generated=true
+*.pb.dart linguist-generated=true
+*.pbenum.dart linguist-generated=true
+*.pbjson.dart linguist-generated=true
+*.pbserver.dart linguist-generated=true
+*.grpc.dart linguist-generated=true
+*.test.dart linguist-generated=true
+
+# Configuration files
+*.yaml linguist-language=YAML
+*.yml linguist-language=YAML
+*.json linguist-language=JSON
+*.toml linguist-language=TOML
+*.ini linguist-language=INI
+*.conf linguist-language=INI
+*.cfg linguist-language=INI
+
+# Documentation
+*.md linguist-language=Markdown
+*.rst linguist-language=reStructuredText
+*.txt linguist-language=Text
+*.adoc linguist-language=AsciiDoc
+
+# Web files
+*.html linguist-language=HTML
+*.css linguist-language=CSS
+*.scss linguist-language=SCSS
+*.sass linguist-language=Sass
+*.less linguist-language=Less
+*.js linguist-language=JavaScript
+*.jsx linguist-language=JavaScript
+*.ts linguist-language=TypeScript
+*.tsx linguist-language=TypeScript
+*.vue linguist-language=Vue
+
+# Shell scripts
+*.sh linguist-language=Shell
+*.bash linguist-language=Shell
+*.zsh linguist-language=Shell
+*.fish linguist-language=Shell
+*.ps1 linguist-language=PowerShell
+*.bat linguist-language=Batch
+*.cmd linguist-language=Batch
+
+# Configuration templates
+*.template linguist-language=Text
+*.tmpl linguist-language=Text
+*.tpl linguist-language=Text
+
+# Database files
+*.sql linguist-language=SQL
+*.ddl linguist-language=SQL
+*.dml linguist-language=SQL
+
+# Build files
+Makefile linguist-language=Makefile
+*.mk linguist-language=Makefile
+*.cmake linguist-language=CMake
+CMakeLists.txt linguist-language=CMake
+*.pro linguist-language=QMake
+*.pri linguist-language=QMake
+
+# Docker files
+Dockerfile* linguist-language=Dockerfile
+docker-compose* linguist-language=YAML
+
+# Kubernetes files
+*.yaml linguist-language=YAML
+*.yml linguist-language=YAML
+
+# Terraform files
+*.tf linguist-language=HCL
+*.tfvars linguist-language=HCL
+*.tfstate linguist-language=JSON
+
+# Ansible files
+*.yml linguist-language=YAML
+*.yaml linguist-language=YAML
+
+# CI/CD files
+*.yml linguist-language=YAML
+*.yaml linguist-language=YAML
+Jenkinsfile linguist-language=Groovy
+
+# Security files
+*.key linguist-language=Text
+*.pem linguist-language=Text
+*.crt linguist-language=Text
+*.csr linguist-language=Text
+
+# Lock files
+*.lock linguist-language=Text
+*.lockfile linguist-language=Text
+package-lock.json linguist-language=JSON
+yarn.lock linguist-language=YAML
+Pipfile.lock linguist-language=TOML
+poetry.lock linguist-language=TOML
+Cargo.lock linguist-language=TOML
+composer.lock linguist-language=JSON
+Gemfile.lock linguist-language=Ruby
+
+# Dependency files
+package.json linguist-language=JSON
+composer.json linguist-language=JSON
+Gemfile linguist-language=Ruby
+requirements.txt linguist-language=Python
+Pipfile linguist-language=TOML
+pyproject.toml linguist-language=TOML
+Cargo.toml linguist-language=TOML
+pubspec.yaml linguist-language=YAML
+composer.lock linguist-language=JSON
+
+# Test files
+*_test.dart linguist-language=Dart
+*_spec.dart linguist-language=Dart
+test_*.dart linguist-language=Dart
+spec_*.dart linguist-language=Dart
+*.test.js linguist-language=JavaScript
+*.spec.js linguist-language=JavaScript
+*.test.ts linguist-language=TypeScript
+*.spec.ts linguist-language=TypeScript
+*.test.py linguist-language=Python
+*.spec.py linguist-language=Python
+
+# Documentation files
+CHANGELOG* linguist-language=Markdown
+LICENSE* linguist-language=Text
+README* linguist-language=Markdown
+CONTRIBUTING* linguist-language=Markdown
+INSTALL* linguist-language=Markdown
+FAQ* linguist-language=Markdown
+TODO* linguist-language=Markdown
+NEWS* linguist-language=Markdown
+HISTORY* linguist-language=Markdown
+RELEASES* linguist-language=Markdown
+VERSION* linguist-language=Text
+
+# Editor files
+.vscode/ linguist-generated=true
+.idea/ linguist-generated=true
+*.sublime-project linguist-generated=true
+*.sublime-workspace linguist-generated=true
+*.code-workspace linguist-generated=true
+
+# OS files
+.DS_Store linguist-generated=true
+Thumbs.db linguist-generated=true
+*.swp linguist-generated=true
+*.swo linguist-generated=true
+*~ linguist-generated=true
+
+# Temporary files
+*.tmp linguist-generated=true
+*.temp linguist-generated=true
+*.bak linguist-generated=true
+*.backup linguist-generated=true
+*.old linguist-generated=true
+*.orig linguist-generated=true
+*.rej linguist-generated=true
+
+# Log files
+*.log linguist-generated=true
+*.out linguist-generated=true
+
+# Coverage files
+coverage/ linguist-generated=true
+lcov.info linguist-generated=true
+*.lcov linguist-generated=true
+
+# Build artifacts
+build/ linguist-generated=true
+dist/ linguist-generated=true
+target/ linguist-generated=true
+bin/ linguist-generated=true
+out/ linguist-generated=true
+
+# Dependency directories
+node_modules/ linguist-generated=true
+vendor/ linguist-generated=true
+.venv/ linguist-generated=true
+venv/ linguist-generated=true
+env/ linguist-generated=true
+.env/ linguist-generated=true
+
+# Flutter specific
+.dart_tool/ linguist-generated=true
+.flutter-plugins/ linguist-generated=true
+.flutter-plugins-dependencies/ linguist-generated=true
+.packages/ linguist-generated=true
+.pub-cache/ linguist-generated=true
+.pub/ linguist-generated=true
+build/ linguist-generated=true
+
+# Android specific
+android/app/build/ linguist-generated=true
+android/build/ linguist-generated=true
+android/gradle/ linguist-generated=true
+android/local.properties linguist-generated=true
+android/gradlew linguist-generated=true
+android/gradlew.bat linguist-generated=true
+
+# iOS specific
+ios/Flutter/Generated.xcconfig linguist-generated=true
+ios/Flutter/flutter_export_environment.sh linguist-generated=true
+ios/Pods/ linguist-generated=true
+ios/Podfile.lock linguist-generated=true
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/ linguist-generated=true
+ios/Runner.xcodeproj/xcuserdata/ linguist-generated=true
+
+# Web specific
+web/ linguist-generated=true
+
+# Windows specific
+build/windows/ linguist-generated=true
+*.vcxproj* linguist-generated=true
+*.sln linguist-generated=true
+
+# Linux specific
+build/linux/ linguist-generated=true
+
+# macOS specific
+build/macos/ linguist-generated=true
+
+# Custom merge drivers
+* merge=dart
+* merge=json
+* merge=yaml
+* merge=xml
+* merge=html
+* merge=css
+* merge=javascript
+* merge=typescript
+
+# Custom diff drivers
+*.dart diff=dart
+*.json diff=json
+*.yaml diff=yaml
+*.yml diff=yaml
+*.xml diff=xml
+*.html diff=html
+*.css diff=css
+*.js diff=javascript
+*.ts diff=typescript

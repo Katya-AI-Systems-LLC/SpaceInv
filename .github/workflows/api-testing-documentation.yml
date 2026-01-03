@@ -1,0 +1,541 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: API Testing and Documentation
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'api/**'
+      - 'docs/api/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'api/**'
+      - 'docs/api/**'
+  schedule:
+    - cron: '0 4 * * *'  # Daily at 4 AM
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of API testing to perform'
+        required: true
+        type: choice
+        options:
+          - 'unit'
+          - 'integration'
+          - 'load'
+          - 'security'
+          - 'contract'
+          - 'all'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'development'
+          - 'staging'
+          - 'production'
+
+jobs:
+  api-unit-tests:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'unit' || github.event.inputs.test_type == 'all' || github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-cov pytest-mock
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Run API unit tests
+        run: |
+          pytest tests/api/unit/ \
+            --cov=api \
+            --cov-report=xml \
+            --cov-report=html \
+            --junitxml=api-unit-results.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-unit-results
+          path: |
+            api-unit-results.xml
+            coverage/
+            htmlcov/
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: coverage.xml
+          flags: api-unit
+          name: api-unit-coverage
+
+  api-integration-tests:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'integration' || github.event.inputs.test_type == 'all' || github.event_name == 'push'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-asyncio
+          pip install httpx
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Wait for services
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          
+          until redis-cli ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run API integration tests
+        run: |
+          pytest tests/api/integration/ \
+            --junitxml=api-integration-results.xml \
+            --tb=short
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-integration-results
+          path: api-integration-results.xml
+
+  api-load-testing:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'load' || github.event.inputs.test_type == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install locust
+          pip install -r requirements.txt
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          export REDIS_URL=$REDIS_URL
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run load tests
+        run: |
+          locust -f tests/api/load/locustfile.py \
+            --headless \
+            --users 100 \
+            --spawn-rate 10 \
+            --run-time 60s \
+            --host http://localhost:8000 \
+            --html load-test-report.html \
+            --csv load-test-results.csv
+
+      - name: Upload load test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-load-results
+          path: |
+            load-test-report.html
+            load-test-results.csv
+
+  api-security-testing:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'security' || github.event.inputs.test_type == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install bandit safety
+          pip install httpx
+          pip install -r requirements.txt
+
+      - name: Run security scan on API code
+        run: |
+          bandit -r api/ -f json -o bandit-report.json
+          safety check --json --output safety-report.json
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          export REDIS_URL=$REDIS_URL
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run API security tests
+        run: |
+          pytest tests/api/security/ \
+            --junitxml=api-security-results.xml
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-security-results
+          path: |
+            bandit-report.json
+            safety-report.json
+            api-security-results.xml
+
+  api-contract-testing:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'contract' || github.event.inputs.test_type == 'all' || github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest
+          pip install schemathesis
+          pip install httpx
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          export REDIS_URL=$REDIS_URL
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run contract tests
+        run: |
+          schemathesis run \
+            http://localhost:8000/openapi.json \
+            --base-url http://localhost:8000 \
+            --junitxml=api-contract-results.xml
+
+      - name: Upload contract test results
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-contract-results
+          path: api-contract-results.xml
+
+  api-documentation-generation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install fastapi uvicorn
+          pip install -r requirements.txt
+
+      - name: Generate OpenAPI specification
+        run: |
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+          curl -o openapi.json http://localhost:8000/openapi.json
+
+      - name: Generate API documentation
+        run: |
+          pip install redoc-cli
+          redoc-cli build openapi.json --output api-documentation.html
+
+      - name: Generate API client SDKs
+        run: |
+          pip install openapi-generator
+          openapi-generator-cli generate \
+            -i openapi.json \
+            -g python \
+            -o client-sdks/python
+
+      - name: Upload documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-documentation
+          path: |
+            openapi.json
+            api-documentation.html
+            client-sdks/
+
+  api-performance-monitoring:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install httpx
+          pip install -r requirements.txt
+
+      - name: Run performance monitoring
+        run: |
+          python scripts/monitor_api_performance.py \
+            --base-url $API_BASE_URL \
+            --output performance-report.json
+
+      - name: Upload performance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-performance-report
+          path: performance-report.json
+
+  api-compatibility-testing:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    strategy:
+      matrix:
+        api_version: [v1, v2, latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest
+          pip install httpx
+          pip install -r requirements.txt
+
+      - name: Run compatibility tests
+        run: |
+          pytest tests/api/compatibility/ \
+            --api-version=${{ matrix.api_version }} \
+            --junitxml=compatibility-results-${{ matrix.api_version }}.xml
+
+      - name: Upload compatibility results
+        uses: actions/upload-artifact@v3
+        with:
+          name: compatibility-results-${{ matrix.api_version }}
+          path: compatibility-results-${{ matrix.api_version }}.xml
+
+  api-third-party-integration-tests:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    strategy:
+      matrix:
+        service: [payment, notification, analytics, storage]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pytest
+          pip install httpx
+          pip install -r requirements.txt
+
+      - name: Run third-party integration tests
+        run: |
+          pytest tests/api/third-party/ \
+            --service=${{ matrix.service }} \
+            --junitxml=third-party-results-${{ matrix.service }}.xml
+
+      - name: Upload third-party results
+        uses: actions/upload-artifact@v3
+        with:
+          name: third-party-results-${{ matrix.service }}
+          path: third-party-results-${{ matrix.service }}.xml
+
+  api-quality-report:
+    needs: [api-unit-tests, api-integration-tests, api-load-testing, api-security-testing, api-contract-testing]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Generate quality report
+        run: |
+          python scripts/generate_api_quality_report.py \
+            --input-dir results/ \
+            --output api-quality-report.json
+
+      - name: Upload quality report
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-quality-report
+          path: api-quality-report.json
+
+  deploy-documentation:
+    needs: api-documentation-generation
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Download documentation
+        uses: actions/download-artifact@v3
+        with:
+          name: api-documentation
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs
+
+  notify-api-team:
+    needs: [api-unit-tests, api-integration-tests, api-load-testing, api-security-testing, api-contract-testing, api-quality-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Notify API team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.API_WEBHOOK_URL;
+            const testType = '${{ github.event.inputs.test_type || 'scheduled' }}';
+            const environment = '${{ github.event.inputs.environment || 'staging' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔌 API Testing Completed: ${testType}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Test Type',
+                      value: testType,
+                      short: true
+                    }, {
+                      title: 'Environment',
+                      value: environment,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-monitoring:
+    needs: [api-performance-monitoring, api-quality-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Update monitoring dashboards
+        run: |
+          echo "Updating API monitoring dashboards..."
+          # Add monitoring update logic here
+
+      - name: Update alerting rules
+        run: |
+          echo "Updating API alerting rules..."
+          # Add alerting rules update logic here
+
+  cleanup:
+    needs: [api-unit-tests, api-integration-tests, api-load-testing, api-security-testing, api-contract-testing, api-documentation-generation]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup artifacts
+        run: |
+          echo "Cleaning up API artifacts..."
+          # Add cleanup logic here

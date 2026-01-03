@@ -1,0 +1,330 @@
+# Default values for space-invaders Helm chart
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Replica configuration
+replicaCount: 3
+
+# Image configuration
+image:
+  registry: docker.io
+  repository: space-invaders
+  pullPolicy: IfNotPresent
+  tag: "2.0.0"
+
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 2000
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+  annotations: {}
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  hosts:
+    - host: space-invaders.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: space-invaders-tls
+      hosts:
+        - space-invaders.com
+
+# Resource configuration
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Startup probe
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+# Environment variables
+env: []
+
+# ConfigMaps
+configMaps:
+  nginx:
+    enabled: true
+    data:
+      nginx.conf: |
+        events {
+            worker_connections 1024;
+        }
+        
+        http {
+            include       /etc/nginx/mime.types;
+            default_type  application/octet-stream;
+            
+            gzip on;
+            gzip_vary on;
+            gzip_min_length 1024;
+            gzip_types text/plain text/css application/javascript application/json;
+            
+            server {
+                listen 80;
+                server_name localhost;
+                root /usr/share/nginx/html;
+                index index.html;
+                
+                location / {
+                    try_files $uri $uri/ /index.html;
+                }
+                
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+            }
+        }
+
+# Secrets
+secrets: {}
+
+# Persistent volumes
+persistence:
+  enabled: false
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+
+# Service monitor for Prometheus
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Pod monitor for Prometheus
+podMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+
+# Network policies
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
+
+# Pod security policies
+podSecurityPolicy:
+  enabled: false
+  annotations: {}
+
+# RBAC
+rbac:
+  create: true
+
+# Priority class
+priorityClassName: ""
+
+# Additional labels
+commonLabels: {}
+
+# Additional annotations
+commonAnnotations: {}
+
+# Init containers
+initContainers: []
+
+# Sidecar containers
+sidecars: []
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Node affinity
+nodeAffinity: {}
+
+# Pod affinity
+podAffinity: {}
+
+# Pod anti-affinity
+podAntiAffinity:
+  enabled: true
+  topologyKey: "kubernetes.io/hostname"
+
+# Horizontal Pod Autoscaler metrics
+hpaMetrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+# Vertical Pod Autoscaler
+vpa:
+  enabled: false
+  updateMode: "Auto"
+
+# Custom metrics adapter
+customMetrics:
+  enabled: false
+
+# Service mesh integration
+serviceMesh:
+  enabled: false
+  istio:
+    enabled: false
+    gateway: ""
+    virtualService: {}
+    destinationRule: {}
+
+# Monitoring and logging
+monitoring:
+  enabled: false
+  prometheus:
+    enabled: false
+    port: 9090
+  grafana:
+    enabled: false
+    port: 3000
+  jaeger:
+    enabled: false
+    port: 16686
+  elasticsearch:
+    enabled: false
+    port: 9200
+  kibana:
+    enabled: false
+    port: 5601
+
+# Backup and restore
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retention: "7d"
+  storage:
+    type: "s3"
+    bucket: ""
+    region: ""
+    accessKey: ""
+    secretKey: ""
+
+# Security scanning
+security:
+  trivy:
+    enabled: false
+    schedule: "0 3 * * *"
+  falco:
+    enabled: false
+
+# Cost optimization
+costOptimization:
+  enabled: false
+  spotInstances: false
+  resourceLimits: false
+
+# Multi-cluster deployment
+multiCluster:
+  enabled: false
+  clusters: []
+
+# GitOps integration
+gitOps:
+  enabled: false
+  provider: "argocd"
+  repository: ""
+  path: ""
+  targetRevision: ""

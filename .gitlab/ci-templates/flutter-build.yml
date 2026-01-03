@@ -1,0 +1,275 @@
+# GitLab CI/CD Templates for Space Invaders Enhanced Edition
+
+# Flutter Build Template
+.flutter-build:
+  stage: build
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: flutter-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+  script:
+    - flutter analyze
+    - flutter test --coverage
+    - flutter build web --web-renderer canvaskit --release
+  artifacts:
+    reports:
+      junit: test-results.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+    paths:
+      - build/web/
+      - coverage/
+    expire_in: 1 week
+  coverage: '/Coverage: \d+\.\d+%/'
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Android Build Template
+.android-build:
+  stage: build
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: android-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+        - android/.gradle/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+    - cd android
+    - ./gradlew wrapper --gradle-version=7.5
+    - chmod +x gradlew
+  script:
+    - flutter build apk --release
+    - flutter build appbundle --release
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/
+      - build/app/outputs/bundle/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Windows Build Template
+.windows-build:
+  stage: build
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: windows-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+    - flutter config --enable-windows-desktop
+  script:
+    - flutter build windows --release
+  artifacts:
+    paths:
+      - build/windows/runner/Release/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Security Scan Template
+.security-scan:
+  stage: test
+  image: owasp/zap2docker-stable
+  script:
+    - mkdir -p /zap/wrk/
+    - /zap/zap-baseline.py -t build/web/ -J gl-sast-report.json || true
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+    paths:
+      - gl-sast-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Dependency Scan Template
+.dependency-scan:
+  stage: test
+  image: python:3.9
+  before_script:
+    - pip install safety
+  script:
+    - safety check
+  artifacts:
+    reports:
+      dependency_scanning: gl-dependency-scanning-report.json
+    paths:
+      - safety-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Performance Test Template
+.performance-test:
+  stage: test
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: performance-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+    - flutter build web --web-renderer canvaskit --release
+  script:
+    - flutter test integration_test/performance_test.dart
+    - python3 scripts/performance_analyzer.py build/web/
+  artifacts:
+    paths:
+      - performance-results.json
+      - performance-report.html
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# Accessibility Test Template
+.accessibility-test:
+  stage: test
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: accessibility-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+    - flutter build web --web-renderer canvaskit --release
+  script:
+    - npm install -g axe-cli
+    - axe build/web/ --tags wcag2a,wcag2aa
+  artifacts:
+    paths:
+      - accessibility-report.json
+      - accessibility-report.html
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# Deploy to Staging Template
+.deploy-staging:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to staging environment"
+    - curl -X POST "$STAGING_DEPLOY_URL" -H "Authorization: Bearer $DEPLOY_TOKEN"
+  environment:
+    name: staging
+    url: https://staging.space-invaders.com
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# Deploy to Production Template
+.deploy-production:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to production environment"
+    - curl -X POST "$PRODUCTION_DEPLOY_URL" -H "Authorization: Bearer $DEPLOY_TOKEN"
+  environment:
+    name: production
+    url: https://space-invaders.com
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Deploy to App Store Template
+.deploy-app-store:
+  stage: deploy
+  image: cirrusci/flutter:3.16.0
+  cache:
+    - key: app-store-$CI_COMMIT_REF_SLUG
+      paths:
+        - .flutter/
+        - .pub-cache/
+        - android/.gradle/
+  before_script:
+    - flutter channel stable
+    - flutter upgrade
+    - flutter pub get
+    - cd android
+    - ./gradlew wrapper --gradle-version=7.5
+    - chmod +x gradlew
+  script:
+    - flutter build appbundle --release
+    - echo "Deploying to Google Play Store"
+    - echo "Deploying to Apple App Store"
+  artifacts:
+    paths:
+      - build/app/outputs/bundle/release/
+    expire_in: 1 week
+  when: manual
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Release Template
+.release:
+  stage: release
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "Creating release"
+    - VERSION=${CI_COMMIT_TAG#v}
+    - echo "Release version: $VERSION"
+    - curl -X POST "$RELEASE_API_URL" -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" -d "{\"tag_name\":\"$CI_COMMIT_TAG\",\"name\":\"Release $VERSION\",\"description\":\"Release $VERSION of Space Invaders Enhanced Edition\"}"
+  rules:
+    - if: $CI_COMMIT_TAG
+
+# Notification Template
+.notify:
+  stage: .post
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Sending notifications"
+    - curl -X POST "$SLACK_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"text\":\"Pipeline $CI_PIPELINE_SOURCE for $CI_COMMIT_REF_SLUG completed with status: $CI_JOB_STATUS\"}"
+    - curl -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"content\":\"Pipeline $CI_PIPELINE_SOURCE for $CI_COMMIT_REF_SLUG completed with status: $CI_JOB_STATUS\"}"
+  rules:
+    - when: always
+
+# Cleanup Template
+.cleanup:
+  stage: .post
+  image: alpine:latest
+  script:
+    - echo "Cleaning up artifacts"
+    - echo "Cleaning up temporary files"
+  rules:
+    - when: always

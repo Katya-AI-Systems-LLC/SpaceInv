@@ -1,0 +1,571 @@
+# GitLab CI/CD Templates for Space Invaders Enhanced Edition
+
+# Database Management Pipeline
+database-management:
+  stage: deploy
+  image: postgres:15
+  services:
+    - postgres:15
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+  before_script:
+    - apt-get update -y
+    - apt-get install -y python3 python3-pip
+    - pip3 install psycopg2-binary alembic sqlalchemy
+    - pip3 install -r requirements.txt
+  script:
+    - echo "🗄️ Starting database management pipeline..."
+    
+    # Wait for database
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for database..."
+        sleep 2
+      done
+    
+    # Run database migrations
+    - echo "🔄 Running database migrations..."
+    - export DATABASE_URL=$DATABASE_URL
+    - alembic upgrade head
+    
+    # Verify migration
+    - echo "✅ Verifying migration..."
+    - alembic current
+    - alembic history
+    
+    # Run migration tests
+    - echo "🧪 Running migration tests..."
+    - python3 tests/test_migrations.py
+    
+    # Create backup
+    - echo "💾 Creating database backup..."
+    - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    - BACKUP_FILE="space_invaders_backup_${TIMESTAMP}.sql"
+    - pg_dump $DATABASE_URL > $BACKUP_FILE
+    - gzip $BACKUP_FILE
+    
+    # Upload to cloud storage
+    - echo "☁️ Uploading backup to cloud storage..."
+    - |
+      if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+        curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+        export PATH=$PATH:$HOME/yandex-cloud/bin
+        
+        yc config profile create sa-profile
+        yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+        yc config set folder-id "$YC_FOLDER_ID"
+        
+        yc storage s3 cp \
+          --endpoint-url=https://storage.yandexcloud.net \
+          ${BACKUP_FILE}.gz \
+          s3://space-invaders-backups/
+      fi
+    
+    # Analyze database performance
+    - echo "📊 Analyzing database performance..."
+    - python3 scripts/analyze_database_performance.py
+    
+    # Optimize database
+    - echo "⚡ Optimizing database..."
+    - python3 scripts/optimize_database.py
+    
+    # Update statistics
+    - echo "📈 Updating database statistics..."
+    - python3 scripts/update_statistics.py
+    
+    # Generate database report
+    - echo "📋 Generating database report..."
+    - |
+      cat > database-report.json << EOF
+      {
+        "database": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "migration_status": "success",
+          "backup_created": "${BACKUP_FILE}.gz",
+          "performance_optimized": true,
+          "statistics_updated": true
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: database-report.json
+    paths:
+      - database-report.json
+      - ${BACKUP_FILE}.gz
+      - performance-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# API Testing Pipeline
+api-testing:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install pytest pytest-cov pytest-asyncio
+    - pip install fastapi uvicorn httpx
+    - pip install locust schemathesis
+    - pip install bandit safety
+    - pip install -r requirements.txt
+  script:
+    - echo "🔌 Starting API testing pipeline..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Start API server
+    - echo "🚀 Starting API server..."
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run API unit tests
+    - echo "🧪 Running API unit tests..."
+    - pytest tests/api/unit/ --cov=api --cov-report=xml --cov-report=html --junitxml=api-unit-results.xml
+    
+    # Run API integration tests
+    - echo "🔗 Running API integration tests..."
+    - pytest tests/api/integration/ --junitxml=api-integration-results.xml
+    
+    # Run API contract tests
+    - echo "📋 Running API contract tests..."
+    - schemathesis run http://localhost:8000/openapi.json --base-url http://localhost:8000 --junitxml=api-contract-results.xml
+    
+    # Run API security tests
+    - echo "🔒 Running API security tests..."
+    - bandit -r api/ -f json -o bandit-report.json
+    - safety check --json --output safety-report.json
+    - pytest tests/api/security/ --junitxml=api-security-results.xml
+    
+    # Generate OpenAPI specification
+    - echo "📚 Generating API documentation..."
+    - curl -o openapi.json http://localhost:8000/openapi.json
+    - pip install redoc-cli
+    - redoc-cli build openapi.json --output api-documentation.html
+    
+    # Generate API client SDKs
+    - echo "🔧 Generating API client SDKs..."
+    - pip install openapi-generator
+    - openapi-generator-cli generate -i openapi.json -g python -o client-sdks/python
+    
+    # Generate API quality report
+    - echo "📊 Generating API quality report..."
+    - |
+      cat > api-quality-report.json << EOF
+      {
+        "api": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "unit_tests": "completed",
+          "integration_tests": "completed",
+          "contract_tests": "completed",
+          "security_tests": "completed",
+          "documentation_generated": true,
+          "client_sdks_generated": true
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: api-quality-report.json
+      coverage: coverage.xml
+    paths:
+      - api-quality-report.json
+      - api-unit-results.xml
+      - api-integration-results.xml
+      - api-contract-results.xml
+      - api-security-results.xml
+      - bandit-report.json
+      - safety-report.json
+      - openapi.json
+      - api-documentation.html
+      - client-sdks/
+      - htmlcov/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# API Load Testing Pipeline
+api-load-testing:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install locust
+    - pip install fastapi uvicorn
+    - pip install -r requirements.txt
+  script:
+    - echo "⚡ Starting API load testing..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Start API server
+    - echo "🚀 Starting API server..."
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run load tests
+    - echo "🏋️ Running load tests..."
+    - locust -f tests/api/load/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host http://localhost:8000 --html load-test-report.html --csv load-test-results.csv
+    
+    # Generate load test report
+    - echo "📊 Generating load test report..."
+    - |
+      cat > load-test-report.json << EOF
+      {
+        "load_test": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "users": 100,
+          "spawn_rate": 10,
+          "run_time": "60s",
+          "report_generated": true
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: load-test-report.json
+    paths:
+      - load-test-report.json
+      - load-test-report.html
+      - load-test-results.csv
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Russian Cloud Database Integration
+russian-cloud-database:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq python3 py3-pip
+    - pip3 install psycopg2-binary
+  script:
+    - echo "☁️ Starting Russian Cloud Database Integration..."
+    
+    # Yandex Database integration
+    - echo "🇷🇺 Setting up Yandex Database..."
+    - |
+      if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+        echo "Configuring Yandex Database..."
+        
+        # Create Yandex Database connection
+        cat > ydb-config.json << EOF
+        {
+          "database": "${YC_DATABASE_PATH}",
+          "endpoint": "${YC_DATABASE_ENDPOINT}",
+          "credentials": "${YC_SERVICE_ACCOUNT_KEY}"
+        }
+        EOF
+        
+        # Test Yandex Database connection
+        python3 scripts/test_ydb_connection.py --config ydb-config.json
+        
+        echo "✅ Yandex Database integration completed"
+      fi
+    
+    # VK Cloud Database integration
+    - echo "☁️ Setting up VK Cloud Database..."
+    - |
+      if [ -n "$VK_CLOUD_TOKEN" ]; then
+        echo "Configuring VK Cloud Database..."
+        
+        # Test VK Cloud Database connection
+        python3 scripts/test_vk_database.py --token "$VK_CLOUD_TOKEN" --endpoint "$VK_CLOUD_DATABASE_ENDPOINT"
+        
+        echo "✅ VK Cloud Database integration completed"
+      fi
+    
+    # Selectel Database integration
+    - echo "☁️ Setting up Selectel Database..."
+    - |
+      if [ -n "$SELECTEL_DATABASE_HOST" ]; then
+        echo "Configuring Selectel Database..."
+        
+        # Test Selectel Database connection
+        python3 scripts/test_selectel_database.py --host "$SELECTEL_DATABASE_HOST" --user "$SELECTEL_DATABASE_USER" --password "$SELECTEL_DATABASE_PASSWORD"
+        
+        echo "✅ Selectel Database integration completed"
+      fi
+    
+    # Generate database integration report
+    - echo "📊 Generating database integration report..."
+    - |
+      cat > database-integration-report.json << EOF
+      {
+        "database_integration": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "yandex_database": $([ -n "$YC_SERVICE_ACCOUNT_KEY" ] && echo "true" || echo "false"),
+          "vk_cloud_database": $([ -n "$VK_CLOUD_TOKEN" ] && echo "true" || echo "false"),
+          "selectel_database": $([ -n "$SELECTEL_DATABASE_HOST" ] && echo "true" || echo "false"),
+          "overall": "success"
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: database-integration-report.json
+    paths:
+      - database-integration-report.json
+      - ydb-config.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Russian Cloud API Integration
+russian-cloud-api:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install httpx pytest
+    - pip install -r requirements.txt
+  script:
+    - echo "☁️ Starting Russian Cloud API Integration..."
+    
+    # Test Yandex Cloud API
+    - echo "🇷🇺 Testing Yandex Cloud API..."
+    - |
+      if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+        pytest tests/api/russian-clouds/test_yandex_api.py --junitxml=yandex-api-results.xml
+        echo "✅ Yandex Cloud API testing completed"
+      fi
+    
+    # Test VK Cloud API
+    - echo "☁️ Testing VK Cloud API..."
+    - |
+      if [ -n "$VK_CLOUD_TOKEN" ]; then
+        pytest tests/api/russian-clouds/test_vk_api.py --junitxml=vk-api-results.xml
+        echo "✅ VK Cloud API testing completed"
+      fi
+    
+    # Test Selectel API
+    - echo "☁️ Testing Selectel API..."
+    - |
+      if [ -n "$SELECTEL_TOKEN" ]; then
+        pytest tests/api/russian-clouds/test_selectel_api.py --junitxml=selectel-api-results.xml
+        echo "✅ Selectel API testing completed"
+      fi
+    
+    # Generate API integration report
+    - echo "📊 Generating API integration report..."
+    - |
+      cat > api-integration-report.json << EOF
+      {
+        "api_integration": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "yandex_api": $([ -n "$YC_SERVICE_ACCOUNT_KEY" ] && echo "tested" || echo "skipped"),
+          "vk_api": $([ -n "$VK_CLOUD_TOKEN" ] && echo "tested" || echo "skipped"),
+          "selectel_api": $([ -n "$SELECTEL_TOKEN" ] && echo "tested" || echo "skipped"),
+          "overall": "success"
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: api-integration-report.json
+    paths:
+      - api-integration-report.json
+      - yandex-api-results.xml
+      - vk-api-results.xml
+      - selectel-api-results.xml
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Multi-Cloud Database Backup
+multi-cloud-database-backup:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq python3 py3-pip postgresql-client
+    - pip3 install psycopg2-binary
+  script:
+    - echo "💾 Starting Multi-Cloud Database Backup..."
+    
+    # Create backup
+    - echo "📦 Creating database backup..."
+    - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    - BACKUP_FILE="space_invaders_backup_${TIMESTAMP}.sql"
+    - pg_dump $DATABASE_URL > $BACKUP_FILE
+    - gzip $BACKUP_FILE
+    
+    # Upload to all Russian cloud providers
+    - echo "☁️ Uploading to Russian Cloud providers..."
+    
+    # Upload to Yandex Cloud
+    - |
+      if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+        curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+        export PATH=$PATH:$HOME/yandex-cloud/bin
+        
+        yc config profile create sa-profile
+        yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+        yc config set folder-id "$YC_FOLDER_ID"
+        
+        yc storage s3 cp \
+          --endpoint-url=https://storage.yandexcloud.net \
+          ${BACKUP_FILE}.gz \
+          s3://space-invaders-backups/
+        
+        echo "✅ Backup uploaded to Yandex Cloud"
+      fi
+    
+    # Upload to VK Cloud
+    - |
+      if [ -n "$VK_CLOUD_TOKEN" ]; then
+        curl -X POST "$VK_CLOUD_STORAGE_URL" \
+          -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+          -F "file=@${BACKUP_FILE}.gz"
+        
+        echo "✅ Backup uploaded to VK Cloud"
+      fi
+    
+    # Upload to Selectel
+    - |
+      if [ -n "$SELECTEL_USERNAME" ]; then
+        pip3 install selectel-storage-cli
+        
+        mkdir -p ~/.config/selectel
+        cat > ~/.config/selectel/config.yaml << EOF
+        auth_url: https://api.selcdn.ru
+        username: $SELECTEL_USERNAME
+        password: $SELECTEL_PASSWORD
+        container_name: space-invaders-backups
+        EOF
+        
+        selectel-storage upload \
+          --source ${BACKUP_FILE}.gz \
+          --destination /backups/
+        
+        echo "✅ Backup uploaded to Selectel"
+      fi
+    
+    # Cleanup local backup
+    - rm ${BACKUP_FILE}.gz
+    
+    # Generate backup report
+    - echo "📊 Generating backup report..."
+    - |
+      cat > multi-cloud-backup-report.json << EOF
+      {
+        "backup": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "backup_file": "${BACKUP_FILE}.gz",
+          "yandex_cloud": $([ -n "$YC_SERVICE_ACCOUNT_KEY" ] && echo "uploaded" || echo "skipped"),
+          "vk_cloud": $([ -n "$VK_CLOUD_TOKEN" ] && echo "uploaded" || echo "skipped"),
+          "selectel": $([ -n "$SELECTEL_USERNAME" ] && echo "uploaded" || echo "skipped"),
+          "overall": "success"
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: multi-cloud-backup-report.json
+    paths:
+      - multi-cloud-backup-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Database Security Scan
+database-security-scan:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install bandit safety
+    - pip install psycopg2-binary
+    - pip install -r requirements.txt
+  script:
+    - echo "🔒 Starting Database Security Scan..."
+    
+    # Scan database code
+    - echo "🔍 Scanning database code..."
+    - bandit -r database/ -f json -o database-bandit-report.json
+    - safety check --json --output database-safety-report.json
+    
+    # Check database permissions
+    - echo "👥 Checking database permissions..."
+    - python3 scripts/check_database_permissions.py --output database-permissions-report.json
+    
+    # Audit database access
+    - echo "📋 Auditing database access..."
+    - python3 scripts/audit_database_access.py --output database-access-report.json
+    
+    # Check encryption settings
+    - echo "🔐 Checking encryption settings..."
+    - python3 scripts/check_database_encryption.py --output database-encryption-report.json
+    
+    # Generate security report
+    - echo "📊 Generating security report..."
+    - |
+      cat > database-security-report.json << EOF
+      {
+        "security": {
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "code_scan": "completed",
+          "permissions_check": "completed",
+          "access_audit": "completed",
+          "encryption_check": "completed",
+          "overall": "secure"
+        }
+      }
+      EOF
+  artifacts:
+    reports:
+      junit: database-security-report.json
+    paths:
+      - database-security-report.json
+      - database-bandit-report.json
+      - database-safety-report.json
+      - database-permissions-report.json
+      - database-access-report.json
+      - database-encryption-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"

@@ -1,0 +1,368 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Code Quality and Security
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+
+jobs:
+  code-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Flutter Analyze
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings > flutter-analyze.txt || true
+          flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Dart Format Check
+        run: |
+          dart format --set-exit-if-changed .
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Code formatting issues found. Please run 'dart format .' and commit the changes."
+            exit 1
+          fi
+
+      - name: Custom Linting
+        run: |
+          # Run custom linting rules
+          dart run custom_lints
+          
+          # Check for TODO/FIXME/HACK comments
+          if grep -r "TODO\|FIXME\|HACK" --include="*.dart" lib/; then
+            echo "Found TODO/FIXME/HACK comments. Please address them or add to issue tracker."
+            exit 1
+          fi
+
+      - name: Upload Analysis Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: analysis-results
+          path: flutter-analyze.txt
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v2
+
+      - name: Dependency Security Scan
+        run: |
+          # Check for known vulnerable dependencies
+          curl -sSfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/config/trivy.yaml > trivy.yaml
+          trivy config --config trivy.yaml .
+
+      - name: Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+
+  performance-analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build for Performance Analysis
+        run: |
+          flutter build web --web-renderer canvaskit --release --profile
+
+      - name: Performance Analysis
+        run: |
+          # Run performance analysis
+          python3 scripts/performance_analyzer.py build/web/
+          
+          # Check bundle size
+          du -sh build/web/
+          
+          # Analyze JavaScript bundle
+          npx webpack-bundle-analyzer build/web/main.dart.js
+
+      - name: Upload Performance Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: |
+            performance-results.json
+            performance-report.html
+
+  accessibility-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Accessibility Testing
+        run: |
+          # Install axe CLI
+          npm install -g @axe-core/cli
+          
+          # Run accessibility tests
+          axe build/web/ --tags wcag2a,wcag2aa,wcag21aa --exit
+          
+          # Check color contrast
+          npm install -g pa11y
+          pa11y build/web/ --standard WCAG2AA
+
+      - name: Accessibility Audit
+        run: |
+          # Check for accessibility issues in code
+          grep -r "alt=" --include="*.dart" lib/ || echo "No alt attributes found"
+          
+          # Check for semantic HTML
+          grep -r "Semantic" --include="*.dart" lib/ || echo "No semantic widgets found"
+
+      - name: Upload Accessibility Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: accessibility-results
+          path: |
+            accessibility-report.json
+            accessibility-report.html
+
+  test-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run Tests with Coverage
+        run: |
+          flutter test --coverage --reporter=expanded
+          genhtml coverage/lcov.info -o coverage/html
+
+      - name: Check Coverage Threshold
+        run: |
+          COVERAGE=$(lcov --summary coverage/lcov.info | grep "lines......:" | awk '{print $2}' | sed 's/%//')
+          echo "Current coverage: $COVERAGE%"
+          
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage is below 80%. Current: $COVERAGE%"
+            exit 1
+          fi
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: coverage/html
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Run Integration Tests
+        run: |
+          # Start web server
+          cd build/web
+          python3 -m http.server 8080 &
+          SERVER_PID=$!
+          cd ../..
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Run integration tests
+          flutter drive --driver=test_driver/integration_test.dart --target=integration_test/app_test.dart --web-port=8080
+          
+          # Stop server
+          kill $SERVER_PID
+
+      - name: Upload Integration Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-results
+          path: integration_test_results.json
+
+  code-quality-report:
+    needs: [code-analysis, security-scan, performance-analysis, accessibility-scan, test-coverage, integration-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download All Results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Generate Quality Report
+        run: |
+          # Generate comprehensive quality report
+          python3 scripts/quality_report_generator.py results/ > quality-report.md
+          
+          # Check quality gates
+          python3 scripts/quality_gate_checker.py results/
+
+      - name: Upload Quality Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-report
+          path: quality-report.md
+
+      - name: Comment PR with Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('quality-report.md', 'utf8');
+            
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 📊 Code Quality Report\n\n${report}`
+            });
+
+  notify-quality-team:
+    needs: [code-quality-report]
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Notify Quality Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.QUALITY_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🚨 Code Quality Check Failed`,
+                  attachments: [{
+                    color: 'danger',
+                    fields: [{
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Branch',
+                      value: '${{ github.ref }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action',
+                      value: '[View Results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})',
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-quality-metrics:
+    needs: [code-quality-report]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Quality Metrics
+        run: |
+          echo "Updating quality metrics dashboard..."
+          # Add metrics update commands here
+
+  cleanup:
+    needs: [code-quality-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup Artifacts
+        run: |
+          echo "Cleaning up old artifacts..."
+          # Add cleanup commands here

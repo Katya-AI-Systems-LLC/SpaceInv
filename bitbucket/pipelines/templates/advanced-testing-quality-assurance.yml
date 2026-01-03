@@ -1,0 +1,838 @@
+# Bitbucket Pipelines Templates for Space Invaders Enhanced Edition
+
+# Code Quality and Review Automation Pipeline
+pipelines:
+  custom:
+    code-quality-review:
+      - step:
+          name: 'Code Quality Analysis'
+          image: python:3.11
+          script:
+            - echo "🔍 Starting code quality analysis..."
+            - pip install black isort flake8 mypy bandit safety
+            - pip install pylint pydocstyle pycodestyle
+            - pip install pre-commit gitpython requests
+            - npm install -g eslint prettier jshint
+            - flutter pub get
+            
+            # Code formatting checks
+            - black --check --diff .
+            - isort --check-only --diff .
+            
+            # Linting
+            - flake8 --format=json --output-file=flake8-report.json .
+            - pylint --output-format=json . > pylint-report.json || true
+            - mypy --json-report mypy-report . || true
+            
+            # Security analysis
+            - bandit -r . -f json -o bandit-quality-report.json
+            - safety check --json --output safety-quality-report.json
+            
+            # JavaScript/TypeScript checks
+            - eslint --format=json --output-file=eslint-report.json . || true
+            - jshint --reporter=json . > jshint-report.json || true
+            - prettier --check --format=json . > prettier-report.json || true
+            
+            # Flutter checks
+            - flutter analyze --format=json > flutter-analysis.json || true
+            - dart format --set-exit-if-changed .
+            - flutter analyze --fatal-infos > flutter-lint-report.txt || true
+            
+            # Documentation checks
+            - pydocstyle --match='(?!test_).*\.py' . > pydocstyle-report.txt || true
+            - find . -name "*.md" -exec markdownlint {} \; > markdownlint-report.txt || true
+            
+            # Generate comprehensive code quality report
+            - python scripts/generate_code_quality_report.py \
+              --flake8 flake8-report.json \
+              --pylint pylint-report.json \
+              --mypy mypy-report/mypy-report.json \
+              --bandit bandit-quality-report.json \
+              --safety safety-quality-report.json \
+              --eslint eslint-report.json \
+              --jshint jshint-report.json \
+              --prettier prettier-report.json \
+              --flutter flutter-analysis.json \
+              --output comprehensive-code-quality-report.json
+          artifacts:
+            - flake8-report.json
+            - pylint-report.json
+            - mypy-report/mypy-report.json
+            - bandit-quality-report.json
+            - safety-quality-report.json
+            - eslint-report.json
+            - jshint-report.json
+            - prettier-report.json
+            - flutter-analysis.json
+            - pydocstyle-report.txt
+            - markdownlint-report.txt
+            - comprehensive-code-quality-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Code quality analysis completed'
+
+    automated-code-review:
+      - step:
+          name: 'Automated Code Review'
+          image: python:3.11
+          script:
+            - echo "🔍 Starting automated code review..."
+            - pip install gitpython requests
+            - pip install -r requirements.txt
+            
+            # Analyze code changes
+            - python scripts/analyze_code_changes.py \
+              --base-branch $BITBUCKET_PR_DESTINATION_BRANCH \
+              --head-branch $BITBUCKET_BRANCH \
+              --output code-changes-analysis.json
+            
+            # Generate automated review comments
+            - python scripts/generate_automated_review.py \
+              --code-changes code-changes-analysis.json \
+              --quality-report comprehensive-code-quality-report.json \
+              --output automated-review-comments.json
+          artifacts:
+            - code-changes-analysis.json
+            - automated-review-comments.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Automated code review completed'
+
+    security-code-review:
+      - step:
+          name: 'Security Code Review'
+          image: python:3.11
+          script:
+            - echo "🔒 Starting security code review..."
+            - pip install bandit safety semgrep
+            - npm install -g audit-ci
+            - pip install -r requirements.txt
+            
+            # Static analysis
+            - bandit -r . -f json -o bandit-security-review.json
+            - safety check --json --output safety-security-review.json
+            - semgrep --config=auto --json --output=semgrep-security-review.json .
+            
+            # Dependency security
+            - npm audit --json > npm-audit-security-review.json || true
+            - audit-ci --moderate
+            
+            # Generate security review report
+            - python scripts/generate_security_review_report.py \
+              --bandit bandit-security-review.json \
+              --safety safety-security-review.json \
+              --semgrep semgrep-security-review.json \
+              --npm-audit npm-audit-security-review.json \
+              --output security-code-review-report.json
+          artifacts:
+            - bandit-security-review.json
+            - safety-security-review.json
+            - semgrep-security-review.json
+            - npm-audit-security-review.json
+            - security-code-review-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security code review completed'
+
+    performance-code-review:
+      - step:
+          name: 'Performance Code Review'
+          image: python:3.11
+          script:
+            - echo "⚡ Starting performance code review..."
+            - pip install py-spy memory-profiler
+            - pip install -r requirements.txt
+            
+            # Analyze performance implications
+            - python scripts/analyze_performance_implications.py \
+              --code-changes code-changes-analysis.json \
+              --output performance-implications-analysis.json
+            
+            # Generate performance review report
+            - python scripts/generate_performance_review_report.py \
+              --performance-analysis performance-implications-analysis.json \
+              --output performance-code-review-report.json
+          artifacts:
+            - performance-implications-analysis.json
+            - performance-code-review-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Performance code review completed'
+
+    documentation-review:
+      - step:
+          name: 'Documentation Review'
+          image: python:3.11
+          script:
+            - echo "📚 Starting documentation review..."
+            - pip install pydocstyle
+            - pip install -r requirements.txt
+            
+            # Python documentation
+            - pydocstyle --match='(?!test_).*\.py' . > pydocstyle-doc-review.txt || true
+            
+            # Markdown documentation
+            - find . -name "*.md" -exec markdownlint {} \; > markdownlint-report.txt || true
+            
+            # API documentation
+            - python scripts/analyze_api_documentation.py \
+              --output api-documentation-analysis.json
+            
+            # Generate documentation review report
+            - python scripts/generate_documentation_review_report.py \
+              --pydocstyle pydocstyle-doc-review.txt \
+              --markdownlint markdownlint-report.txt \
+              --api-docs api-documentation-analysis.json \
+              --output documentation-review-report.json
+          artifacts:
+            - pydocstyle-doc-review.txt
+            - markdownlint-report.txt
+            - api-documentation-analysis.json
+            - documentation-review-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Documentation review completed'
+
+    testing-review:
+      - step:
+          name: 'Testing Review'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🧪 Starting testing review..."
+            - pip install pytest pytest-cov pytest-mock
+            - pip install -r requirements.txt
+            - flutter pub get
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Run tests
+            - pytest --cov=. --cov-report=json --cov-report=html tests/ || true
+            - flutter test --coverage --coverage-json coverage.json || true
+            
+            # Test analysis
+            - python scripts/analyze_test_quality.py \
+              --python-coverage coverage.json \
+              --flutter-coverage coverage.json \
+              --output test-quality-analysis.json
+            
+            # Generate testing review report
+            - python scripts/generate_testing_review_report.py \
+              --test-analysis test-quality-analysis.json \
+              --output testing-review-report.json
+          artifacts:
+            - coverage.json
+            - test-quality-analysis.json
+            - testing-review-report.json
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Testing review completed'
+
+    comprehensive-review:
+      - step:
+          name: 'Comprehensive Code Review'
+          image: python:3.11
+          script:
+            - echo "🔍 Starting comprehensive code review..."
+            - pip install -r requirements.txt
+            
+            # Generate comprehensive review summary
+            - python scripts/generate_comprehensive_review_summary.py \
+              --input-dir review-reports/ \
+              --output comprehensive-review-summary.json
+          artifacts:
+            - comprehensive-review-summary.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Comprehensive code review completed'
+
+# Advanced Testing and Quality Assurance Pipeline
+  advanced-testing-quality-assurance:
+    - step:
+        name: 'Unit Testing'
+        image: python:3.11
+        script:
+          - echo "🔬 Starting unit testing..."
+          - pip install pytest pytest-cov pytest-mock
+          - pip install -r requirements.txt
+          - npm install
+          - flutter pub get
+          
+          # Python unit tests
+          - pytest tests/unit/ \
+            --cov=. \
+            --cov-report=json \
+            --cov-report=html \
+            --cov-report=xml \
+            --junitxml=python-unit-test-results.xml \
+            --html=python-unit-test-report.html \
+            --self-contained-html \
+            --tb=short \
+            -v
+          
+          # JavaScript unit tests
+          - npm test -- --coverage --coverageReporters=json --coverageReporters=html
+          - npm test -- --reporter=junit --outputFile=javascript-unit-test-results.xml
+          
+          # Flutter unit tests
+          - flutter test --coverage \
+            --coverage-json=flutter-unit-coverage.json \
+            --coverage-html=flutter-unit-coverage.html \
+            --reporter=json \
+            --reporter=html \
+            --junit-report=flutter-unit-test-results.xml
+        artifacts:
+          - python-unit-test-results.xml
+          - python-unit-test-report.html
+          - javascript-unit-test-results.xml
+          - flutter-unit-test-results.xml
+          - flutter-unit-coverage.json
+          - flutter-unit-coverage.html
+          - coverage.json
+          - coverage.html
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Unit testing completed'
+
+    - step:
+        name: 'Integration Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        variables:
+          POSTGRES_DB: space_invaders_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          REDIS_URL: "redis://redis:6379"
+        script:
+          - echo "🔗 Starting integration testing..."
+          - pip install pytest pytest-asyncio
+          - pip install httpx aiohttp
+          - pip install -r requirements.txt
+          - npm install
+          - flutter pub get
+          
+          # Wait for services
+          - until pg_isready -h postgres -p 5432 -U postgres; do
+              echo "Waiting for PostgreSQL..."
+              sleep 2
+            done
+          - until redis-cli -h redis ping; do
+              echo "Waiting for Redis..."
+              sleep 2
+            done
+          
+          # Setup test environment
+          - export DATABASE_URL=$DATABASE_URL
+          - export REDIS_URL=$REDIS_URL
+          - export TEST_ENVIRONMENT="integration"
+          
+          # Run integration tests
+          - pytest tests/integration/ \
+            --junitxml=python-integration-test-results.xml \
+            --html=python-integration-test-report.html \
+            --self-contained-html \
+            --tb=short \
+            -v
+          
+          # Start API server
+          - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          - sleep 10
+          
+          # Run API integration tests
+          - pytest tests/api/integration/ \
+            --junitxml=api-integration-test-results.xml \
+            --html=api-integration-test-report.html \
+            --self-contained-html \
+            --tb=short \
+            -v
+        artifacts:
+          - python-integration-test-results.xml
+          - python-integration-test-report.html
+          - api-integration-test-results.xml
+          - api-integration-test-report.html
+        services:
+          - postgres
+          - redis
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Integration testing completed'
+
+    - step:
+        name: 'End-to-End Testing'
+        image: python:3.11
+        script:
+          - echo "🌐 Starting end-to-end testing..."
+          - npm install
+          - npm install --save-dev cypress
+          - flutter pub get
+          
+          # Build web application
+          - flutter build web --release
+          
+          # Start web server
+          - cd build/web && python -m http.server 8080 &
+          - sleep 5
+          
+          # Run Cypress E2E tests
+          - npx cypress run \
+            --browser chrome \
+            --headless \
+            --reporter junit \
+            --reporter-options mochaFile=cypress-e2e-test-results.xml
+          
+          # Run Flutter E2E tests
+          - flutter test integration_test/ \
+            --reporter=json \
+            --reporter=html \
+            --junit-report=flutter-e2e-test-results.xml
+        artifacts:
+          - cypress-e2e-test-results.xml
+          - flutter-e2e-test-results.xml
+          - cypress/videos/
+          - cypress/screenshots/
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'End-to-end testing completed'
+
+    - step:
+        name: 'Performance Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        variables:
+          POSTGRES_DB: space_invaders_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          REDIS_URL: "redis://redis:6379"
+        script:
+          - echo "⚡ Starting performance testing..."
+          - pip install locust pytest pytest-asyncio
+          - pip install httpx aiohttp
+          - pip install -r requirements.txt
+          - npm install --save-dev lighthouse
+          
+          # Wait for services
+          - until pg_isready -h postgres -p 5432 -U postgres; do
+              echo "Waiting for PostgreSQL..."
+              sleep 2
+            done
+          - until redis-cli -h redis ping; do
+              echo "Waiting for Redis..."
+              sleep 2
+            done
+          
+          # Setup test environment
+          - export DATABASE_URL=$DATABASE_URL
+          - export REDIS_URL=$REDIS_URL
+          
+          # Start application
+          - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          - sleep 10
+          
+          # Build web application
+          - flutter build web --release
+          
+          # Start web server
+          - cd build/web && python -m http.server 8080 &
+          - sleep 5
+          
+          # Run Locust performance tests
+          - locust -f tests/performance/locustfile.py \
+            --headless \
+            --users 100 \
+            --spawn-rate 10 \
+            --run-time 60s \
+            --host http://localhost:8000 \
+            --html locust-performance-report.html \
+            --csv locust-performance-results.csv
+          
+          # Run Lighthouse performance tests
+          - npx lighthouse http://localhost:8080 \
+            --output=json \
+            --output-path=lighthouse-performance-report.json \
+            --chrome-flags="--headless"
+        artifacts:
+          - locust-performance-report.html
+          - locust-performance-results.csv
+          - lighthouse-performance-report.json
+        services:
+          - postgres
+          - redis
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Performance testing completed'
+
+    - step:
+        name: 'Security Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        variables:
+          POSTGRES_DB: space_invaders_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          REDIS_URL: "redis://redis:6379"
+        script:
+          - echo "🔒 Starting security testing..."
+          - pip install pytest pytest-asyncio
+          - pip install httpx aiohttp
+          - pip install -r requirements.txt
+          
+          # Wait for services
+          - until pg_isready -h postgres -p 5432 -U postgres; do
+              echo "Waiting for PostgreSQL..."
+              sleep 2
+            done
+          - until redis-cli -h redis ping; do
+              echo "Waiting for Redis..."
+              sleep 2
+            done
+          
+          # Setup test environment
+          - export DATABASE_URL=$DATABASE_URL
+          - export REDIS_URL=$REDIS_URL
+          
+          # Start application
+          - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          - sleep 10
+          
+          # Run OWASP ZAP security scan
+          - docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8000 -J zap-security-report.json -I zap-security-report.html || true
+          
+          # Run security tests
+          - pytest tests/security/ \
+            --junitxml=security-test-results.xml \
+            --html=security-test-report.html \
+            --self-contained-html \
+            --tb=short \
+            -v
+        artifacts:
+          - zap-security-report.json
+          - zap-security-report.html
+          - security-test-results.xml
+          - security-test-report.html
+        services:
+          - postgres
+          - redis
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security testing completed'
+
+    - step:
+        name: 'Accessibility Testing'
+        image: python:3.11
+        script:
+          - echo "♿ Starting accessibility testing..."
+          - npm install
+          - npm install --save-dev axe-core
+          - npm install --save-dev lighthouse
+          - flutter pub get
+          
+          # Build web application
+          - flutter build web --release
+          
+          # Start web server
+          - cd build/web && python -m http.server 8080 &
+          - sleep 5
+          
+          # Run axe accessibility tests
+          - npm run test:accessibility \
+            -- --reporter=json \
+            --outputFile=axe-accessibility-report.json
+          
+          # Run Lighthouse accessibility tests
+          - npx lighthouse http://localhost:8080 \
+            --output=json \
+            --output-path=lighthouse-accessibility-report.json \
+            --chrome-flags="--headless" \
+            --only-categories=accessibility
+        artifacts:
+          - axe-accessibility-report.json
+          - lighthouse-accessibility-report.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Accessibility testing completed'
+
+    - step:
+        name: 'Localization Testing'
+        image: python:3.11
+        script:
+          - echo "🌍 Starting localization testing..."
+          - flutter pub get
+          - npm install
+          - npm install --save-dev i18next
+          
+          # Run localization tests
+          - flutter test test/localization/ \
+            --reporter=json \
+            --reporter=html \
+            --junit-report=flutter-localization-test-results.xml
+          
+          # Run internationalization tests
+          - npm run test:i18n \
+            -- --reporter=json \
+            --outputFile=i18n-test-results.json
+        artifacts:
+          - flutter-localization-test-results.xml
+          - i18n-test-results.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Localization testing completed'
+
+    - step:
+        name: 'Comprehensive Test Report'
+        image: python:3.11
+        script:
+          - echo "📊 Generating comprehensive test report..."
+          - pip install -r requirements.txt
+          
+          # Generate comprehensive test report
+          - python scripts/generate_comprehensive_test_report.py \
+            --input-dir test-results/ \
+            --output comprehensive-test-report.json
+          
+          # Generate test coverage report
+          - python scripts/generate_test_coverage_report.py \
+            --input-dir test-results/ \
+            --output test-coverage-report.json
+        artifacts:
+          - comprehensive-test-report.json
+          - test-coverage-report.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Comprehensive test report generated'
+
+# Branch-specific pipelines
+  branches:
+    main:
+      - step:
+          name: 'Production Testing'
+          image: python:3.11
+          deployment: production
+          script:
+            - echo "🚀 Running production testing..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting production testing'
+
+    develop:
+      - step:
+          name: 'Staging Testing'
+          image: python:3.11
+          deployment: staging
+          script:
+            - echo "🧪 Running staging testing..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting staging testing'
+
+# Pull request pipelines
+  pull-requests:
+    - step:
+        name: 'PR Testing and Review'
+        image: python:3.11
+        script:
+          - echo "🔍 Testing and reviewing PR #$BITBUCKET_PR_ID..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Testing and reviewing PR'
+
+# Scheduled pipelines
+  schedules:
+    - cron: '0 1 * * *'  # Daily at 1 AM
+      step:
+        name: 'Daily Quality Assurance'
+        image: python:3.11
+        script:
+          - echo "🧪 Running daily quality assurance..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily quality assurance'
+
+    - cron: '0 2 * * 0'  # Weekly on Sunday at 2 AM
+      step:
+        name: 'Weekly Comprehensive Testing'
+        image: python:3.11
+        script:
+          - echo "🧪 Running weekly comprehensive testing..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting weekly comprehensive testing'
+
+# Definitions for reusable steps and scripts
+definitions:
+  caches:
+    python:
+      key: python-$BITBUCKET_COMMIT
+      paths:
+        - .cache/pip/
+    flutter:
+      key: flutter-$BITBUCKET_COMMIT
+      paths:
+        - .flutter/
+        - .pub-cache/
+    node:
+      key: node-$BITBUCKET_COMMIT
+      paths:
+        - node_modules/
+
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: space_invaders_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+    redis:
+      image: redis:7
+
+  scripts:
+    - &setup-services |
+      echo "Setting up services..."
+      until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+      until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    - &setup-database |
+      echo "Setting up database..."
+      export DATABASE_URL="postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+      export REDIS_URL="redis://redis:6379"
+    - &start-api |
+      echo "Starting API server..."
+      export DATABASE_URL=$DATABASE_URL
+      export REDIS_URL=$REDIS_URL
+      uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+      sleep 10
+    - &notify-slack |
+      pipe: atlassian/slack-notify:0.3.0
+        variables:
+          WEBHOOK_URL: $SLACK_WEBHOOK_URL
+          MESSAGE: '$BITBUCKET_PIPELINE_STATE: $BITBUCKET_COMMIT'
+
+  steps:
+    - step: &code-quality
+        name: 'Code Quality Analysis'
+        image: python:3.11
+        script:
+          - pip install black isort flake8 mypy bandit safety
+          - npm install -g eslint prettier
+          - flutter pub get
+          - black --check --diff .
+          - isort --check-only --diff .
+          - flake8 --format=json --output-file=flake8-report.json .
+          - mypy --json-report mypy-report . || true
+          - bandit -r . -f json -o bandit-report.json
+          - safety check --json --output safety-report.json
+          - eslint --format=json --output-file=eslint-report.json . || true
+          - prettier --check --format=json . > prettier-report.json || true
+          - flutter analyze --format=json > flutter-analysis.json || true
+        artifacts:
+          - flake8-report.json
+          - mypy-report/mypy-report.json
+          - bandit-report.json
+          - safety-report.json
+          - eslint-report.json
+          - prettier-report.json
+          - flutter-analysis.json
+        after-script:
+          - *notify-slack
+
+    - step: &unit-tests
+        name: 'Unit Tests'
+        image: python:3.11
+        script:
+          - pip install pytest pytest-cov
+          - flutter pub get
+          - pytest tests/unit/ --cov=. --cov-report=json --junitxml=unit-test-results.xml
+          - flutter test --coverage --coverage-json=flutter-coverage.json
+        artifacts:
+          - unit-test-results.xml
+          - coverage.json
+          - flutter-coverage.json
+        after-script:
+          - *notify-slack
+
+    - step: &integration-tests
+        name: 'Integration Tests'
+        image: python:3.11
+        services:
+          - postgres
+          - redis
+        script:
+          - pip install pytest pytest-asyncio httpx
+          - *setup-services
+          - *setup-database
+          - *start-api
+          - pytest tests/integration/ --junitxml=integration-test-results.xml
+        artifacts:
+          - integration-test-results.xml
+        services:
+          - postgres
+          - redis
+        after-script:
+          - *notify-slack

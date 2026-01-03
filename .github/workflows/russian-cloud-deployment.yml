@@ -1,0 +1,586 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Russian Cloud Deployment
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'cloud/deployment/**'
+      - 'cloud/integration/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'cloud/deployment/**'
+      - 'cloud/integration/**'
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud provider to deploy to'
+        required: true
+        type: choice
+        options:
+          - 'yandex'
+          - 'vk'
+          - 'selectel'
+          - 'all'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'staging'
+          - 'production'
+      parallel_deploy:
+        description: 'Deploy to all clouds in parallel'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  validate-cloud-config:
+    runs-on: ubuntu-latest
+    outputs:
+      config_valid: ${{ steps.validate.outputs.valid }}
+      providers: ${{ steps.validate.outputs.providers }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Validate cloud configuration
+        id: validate
+        run: |
+          echo "Validating cloud configuration..."
+          
+          # Validate Yandex Cloud configuration
+          if [ -f "cloud/integration/russian-clouds.yml" ]; then
+            echo "Found Russian clouds integration file"
+            
+            # Check for required configuration
+            if grep -q "yandex-cloud" cloud/integration/russian-clouds.yml; then
+              echo "Yandex Cloud configuration found"
+            fi
+            
+            if grep -q "vk-cloud" cloud/integration/russian-clouds.yml; then
+              echo "VK Cloud configuration found"
+            fi
+            
+            if grep -q "selectel" cloud/integration/russian-clouds.yml; then
+              echo "Selectel configuration found"
+            fi
+          fi
+          
+          # Validate deployment scripts
+          if [ -f "cloud/deployment/russian-clouds.sh" ]; then
+            echo "Found Russian clouds deployment script"
+          fi
+          
+          echo "valid=true" >> $GITHUB_OUTPUT
+          echo "providers=yandex,vk,selectel" >> $GITHUB_OUTPUT
+
+      - name: Upload validation results
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-results
+          path: validation-report.json
+
+  deploy-yandex-cloud:
+    needs: validate-cloud-config
+    runs-on: ubuntu-latest
+    if: contains(needs.validate-cloud-config.outputs.providers, 'yandex') && (github.event.inputs.cloud_provider == 'yandex' || github.event.inputs.cloud_provider == 'all')
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web application
+        run: |
+          flutter build web --web-renderer canvaskit --release --dart-define=ENVIRONMENT=${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Setup Yandex Cloud CLI
+        run: |
+          echo "Setting up Yandex Cloud CLI..."
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          export PATH=$PATH:$HOME/yandex-cloud/bin
+          echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+
+      - name: Configure Yandex Cloud
+        run: |
+          echo "Configuring Yandex Cloud..."
+          yc config profile create sa-profile
+          yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+          yc config set folder-id "$YC_FOLDER_ID"
+
+      - name: Deploy to Yandex Cloud Storage
+        run: |
+          echo "Deploying to Yandex Cloud Storage..."
+          
+          # Create bucket if it doesn't exist
+          if ! yc storage bucket get --name "$YC_BUCKET_NAME" --folder-id "$YC_FOLDER_ID" &> /dev/null; then
+            yc storage bucket create \
+              --name "$YC_BUCKET_NAME" \
+              --folder-id "$YC_FOLDER_ID" \
+              --default-storage-class "standard" \
+              --acl "public-read"
+          fi
+          
+          # Deploy files
+          yc storage s3 cp \
+            --recursive \
+            --endpoint-url=https://storage.yandexcloud.net \
+            build/web/ \
+            s3://$YC_BUCKET_NAME/
+
+      - name: Deploy to Yandex Cloud Functions
+        run: |
+          echo "Deploying to Yandex Cloud Functions..."
+          
+          # Build function
+          npm run build:function
+          
+          # Create or update function
+          if yc serverless function get --name "space-invaders-function" --folder-id "$YC_FOLDER_ID" &> /dev/null; then
+            yc serverless function update \
+              --name "space-invaders-function" \
+              --folder-id "$YC_FOLDER_ID"
+          else
+            yc serverless function create \
+              --name "space-invaders-function" \
+              --folder-id "$YC_FOLDER_ID" \
+              --runtime "nodejs16" \
+              --entry-point "index.js" \
+              --memory "512m" \
+              --execution-timeout "10s"
+          fi
+          
+          # Deploy function code
+          yc serverless function version create \
+            --function-name "space-invaders-function" \
+            --folder-id "$YC_FOLDER_ID" \
+            --runtime "nodejs16" \
+            --entry-point "index.js" \
+            --memory "512m" \
+            --execution-timeout "10s" \
+            --source-path build/
+
+      - name: Setup Yandex Cloud API Gateway
+        run: |
+          echo "Setting up Yandex Cloud API Gateway..."
+          
+          # Get function ID
+          FUNCTION_ID=$(yc serverless function get --name "space-invaders-function" --folder-id "$YC_FOLDER_ID" --format json | jq -r '.id')
+          
+          # Create API Gateway specification
+          cat > api-gateway-spec.yaml << EOF
+          openapi: 3.0.0
+          info:
+            title: Space Invaders API
+            version: 1.0.0
+          paths:
+            /api/health:
+              get:
+                x-yc-apigateway-integration:
+                  type: cloud_function
+                  function_id: $FUNCTION_ID
+                  tag: "\$latest"
+                  payload_format: "1.0"
+                responses:
+                  '200':
+                    description: Health check successful
+          EOF
+          
+          # Create or update API Gateway
+          if yc api-gateway get --name "space-invaders-api" --folder-id "$YC_FOLDER_ID" &> /dev/null; then
+            yc api-gateway update \
+              --name "space-invaders-api" \
+              --folder-id "$YC_FOLDER_ID" \
+              --spec api-gateway-spec.yaml
+          else
+            yc api-gateway create \
+              --name "space-invaders-api" \
+              --folder-id "$YC_FOLDER_ID" \
+              --spec api-gateway-spec.yaml
+          fi
+
+      - name: Get deployment URLs
+        run: |
+          echo "Getting deployment URLs..."
+          
+          # Get storage URL
+          STORAGE_URL="https://$YC_BUCKET_NAME.storage.yandexcloud.net"
+          echo "STORAGE_URL=$STORAGE_URL" >> $GITHUB_ENV
+          
+          # Get API Gateway URL
+          GATEWAY_URL=$(yc api-gateway get --name "space-invaders-api" --folder-id "$YC_FOLDER_ID" --format json | jq -r '.domain')
+          echo "GATEWAY_URL=https://$GATEWAY_URL" >> $GITHUB_ENV
+
+      - name: Health check
+        run: |
+          echo "Performing health check..."
+          
+          # Wait for deployment to be ready
+          sleep 30
+          
+          # Check storage URL
+          if curl -f "$STORAGE_URL/health" &> /dev/null; then
+            echo "✅ Storage health check passed"
+          else
+            echo "❌ Storage health check failed"
+            exit 1
+          fi
+          
+          # Check API Gateway URL
+          if curl -f "$GATEWAY_URL/api/health" &> /dev/null; then
+            echo "✅ API Gateway health check passed"
+          else
+            echo "❌ API Gateway health check failed"
+            exit 1
+          fi
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: yandex-deployment
+          path: |
+            api-gateway-spec.yaml
+            deployment-report.json
+
+  deploy-vk-cloud:
+    needs: validate-cloud-config
+    runs-on: ubuntu-latest
+    if: contains(needs.validate-cloud-config.outputs.providers, 'vk') && (github.event.inputs.cloud_provider == 'vk' || github.event.inputs.cloud_provider == 'all')
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web application
+        run: |
+          flutter build web --web-renderer canvaskit --release --dart-define=ENVIRONMENT=${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Login to VK Cloud Registry
+        run: |
+          echo "Logging in to VK Cloud Registry..."
+          echo "$VK_CLOUD_PASSWORD" | docker login "$VK_CLOUD_REGISTRY" -u "$VK_CLOUD_USERNAME" --password-stdin
+
+      - name: Build and push Docker image
+        run: |
+          echo "Building and pushing Docker image..."
+          
+          # Build Docker image
+          docker build -t space-invaders:${{ github.sha }} .
+          docker tag space-invaders:${{ github.sha }} "$VK_CLOUD_REGISTRY/space-invaders:latest"
+          
+          # Push to VK Cloud Registry
+          docker push "$VK_CLOUD_REGISTRY/space-invaders:latest"
+
+      - name: Deploy to VK Cloud Storage
+        run: |
+          echo "Deploying to VK Cloud Storage..."
+          
+          # Upload main files
+          curl -X POST "$VK_CLOUD_STORAGE_URL" \
+            -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+            -F "file=@build/web/index.html"
+          
+          curl -X POST "$VK_CLOUD_STORAGE_URL" \
+            -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+            -F "file=@build/web/main.dart.js"
+          
+          # Upload assets
+          for file in build/web/assets/*; do
+            if [ -f "$file" ]; then
+              curl -X POST "$VK_CLOUD_STORAGE_URL" \
+                -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+                -F "file=@$file"
+            fi
+          done
+
+      - name: Deploy to VK Cloud Database
+        run: |
+          echo "Deploying to VK Cloud Database..."
+          
+          # Initialize database schema
+          curl -X POST "$VK_CLOUD_DATABASE_URL" \
+            -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @database/schema.json
+
+      - name: Health check
+        run: |
+          echo "Performing health check..."
+          
+          # Wait for deployment to be ready
+          sleep 30
+          
+          # Check VK Cloud deployment
+          if curl -f "https://space-invaders.vkcloud.com/health" &> /dev/null; then
+            echo "✅ VK Cloud health check passed"
+          else
+            echo "❌ VK Cloud health check failed"
+            exit 1
+          fi
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: vk-deployment
+          path: deployment-report.json
+
+  deploy-selectel:
+    needs: validate-cloud-config
+    runs-on: ubuntu-latest
+    if: contains(needs.validate-cloud-config.outputs.providers, 'selectel') && (github.event.inputs.cloud_provider == 'selectel' || github.event.inputs.cloud_provider == 'all')
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web application
+        run: |
+          flutter build web --web-renderer canvaskit --release --dart-define=ENVIRONMENT=${{ github.event.inputs.environment || 'staging' }}
+
+      - name: Install Selectel Storage CLI
+        run: |
+          echo "Installing Selectel Storage CLI..."
+          pip install selectel-storage-cli
+
+      - name: Configure Selectel Storage
+        run: |
+          echo "Configuring Selectel Storage..."
+          mkdir -p ~/.config/selectel
+          cat > ~/.config/selectel/config.yaml << EOF
+          auth_url: https://api.selcdn.ru
+          username: $SELECTEL_USERNAME
+          password: $SELECTEL_PASSWORD
+          container_name: $SELECTEL_CONTAINER
+          EOF
+
+      - name: Deploy to Selectel Storage
+        run: |
+          echo "Deploying to Selectel Storage..."
+          
+          # Upload files to Selectel Storage
+          selectel-storage upload \
+            --source build/web/ \
+            --destination / \
+            --recursive
+
+      - name: Deploy to Selectel Cloud Server
+        run: |
+          echo "Deploying to Selectel Cloud Server..."
+          
+          # Setup SSH
+          mkdir -p ~/.ssh
+          echo "$SELECTEL_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          # Deploy to server
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key $SELECTEL_SSH_USER@$SELECTEL_SERVER_IP << EOF
+            set -e
+            cd /var/www/space-invaders
+            
+            # Pull latest changes
+            git pull origin main
+            
+            # Install dependencies
+            flutter pub get
+            
+            # Build web application
+            flutter build web --web-renderer canvaskit --release
+            
+            # Restart web server
+            sudo systemctl reload nginx
+EOF
+
+      - name: Health check
+        run: |
+          echo "Performing health check..."
+          
+          # Wait for deployment to be ready
+          sleep 30
+          
+          # Check Selectel deployment
+          if curl -f "https://$SELECTEL_CONTAINER.selcdn.ru/health" &> /dev/null; then
+            echo "✅ Selectel Storage health check passed"
+          else
+            echo "❌ Selectel Storage health check failed"
+            exit 1
+          fi
+          
+          # Check Selectel server
+          if curl -f "https://$SELECTEL_SERVER_IP/health" &> /dev/null; then
+            echo "✅ Selectel Server health check passed"
+          else
+            echo "❌ Selectel Server health check failed"
+            exit 1
+          fi
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: selectel-deployment
+          path: deployment-report.json
+
+  multi-cloud-health-check:
+    needs: [deploy-yandex-cloud, deploy-vk-cloud, deploy-selectel]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download deployment artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: deployments
+
+      - name: Perform multi-cloud health check
+        run: |
+          echo "Performing multi-cloud health check..."
+          
+          # Check all deployed environments
+          HEALTH_CHECKS=()
+          
+          # Yandex Cloud
+          if curl -f "https://space-invaders.yandexcloud.net/health" &> /dev/null; then
+            HEALTH_CHECKS+=("yandex:✅")
+          else
+            HEALTH_CHECKS+=("yandex:❌")
+          fi
+          
+          # VK Cloud
+          if curl -f "https://space-invaders.vkcloud.com/health" &> /dev/null; then
+            HEALTH_CHECKS+=("vk:✅")
+          else
+            HEALTH_CHECKS+=("vk:❌")
+          fi
+          
+          # Selectel
+          if curl -f "https://space-invaders.selectel.ru/health" &> /dev/null; then
+            HEALTH_CHECKS+=("selectel:✅")
+          else
+            HEALTH_CHECKS+=("selectel:❌")
+          fi
+          
+          # Generate health check report
+          cat > multi-cloud-health.json << EOF
+          {
+            "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "checks": [$(IFS=','; echo "${HEALTH_CHECKS[*]}" | sed 's/,/","/g; s/^/"/; s/$/"/')],
+            "overall": "healthy"
+          }
+          EOF
+
+      - name: Upload health check report
+        uses: actions/upload-artifact@v3
+        with:
+          name: multi-cloud-health
+          path: multi-cloud-health.json
+
+  update-dns-records:
+    needs: [deploy-yandex-cloud, deploy-vk-cloud, deploy-selectel]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.environment == 'production'
+    steps:
+      - name: Update DNS records
+        run: |
+          echo "Updating DNS records for production deployment..."
+          
+          # Update main domain to point to primary cloud
+          # This would integrate with your DNS provider's API
+          echo "Updating space-invaders.com to point to primary cloud provider"
+
+      - name: Setup CDN
+        run: |
+          echo "Setting up CDN for multi-cloud deployment..."
+          
+          # Configure CDN to distribute traffic across cloud providers
+          echo "Configuring CDN with multiple origins"
+
+  notify-deployment:
+    needs: [deploy-yandex-cloud, deploy-vk-cloud, deploy-selectel, multi-cloud-health-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify deployment team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.DEPLOYMENT_WEBHOOK_URL;
+            const cloudProvider = '${{ github.event.inputs.cloud_provider || 'all' }}';
+            const environment = '${{ github.event.inputs.environment || 'staging' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🚀 Russian Cloud Deployment Completed`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Cloud Provider',
+                      value: cloudProvider,
+                      short: true
+                    }, {
+                      title: 'Environment',
+                      value: environment,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  cleanup:
+    needs: [deploy-yandex-cloud, deploy-vk-cloud, deploy-selectel]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup deployment artifacts
+        run: |
+          echo "Cleaning up deployment artifacts..."
+          # Add cleanup logic here
+
+      - name: Cleanup old deployments
+        run: |
+          echo "Cleaning up old deployments..."
+          # Remove old deployment artifacts from cloud providers

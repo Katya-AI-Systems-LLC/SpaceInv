@@ -1,0 +1,739 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Performance Optimization and Monitoring
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'performance/**'
+      - 'monitoring/**'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'performance/**'
+      - 'monitoring/**'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+  workflow_dispatch:
+    inputs:
+      optimization_type:
+        description: 'Type of performance optimization to perform'
+        required: true
+        type: choice
+        options:
+          - 'comprehensive'
+          - 'application'
+          - 'database'
+          - 'api'
+          - 'frontend'
+          - 'infrastructure'
+          - 'mobile'
+          - 'all'
+      target:
+        description: 'Optimization target'
+        required: true
+        type: choice
+        options:
+          - 'full'
+          - 'game_engine'
+          - 'rendering'
+          - 'physics'
+          - 'audio'
+          - 'ui'
+          - 'networking'
+          - 'storage'
+
+jobs:
+  performance-profiling:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'application' || github.event.inputs.optimization_type == 'all' || github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Install profiling tools
+        run: |
+          pip install py-spy memory-profiler
+          npm install -g clinic
+          flutter pub get
+
+      - name: Run Python performance profiling
+        run: |
+          python -m py-spy top --output python-profile.svg --duration 30 python scripts/sample_backend.py &
+          sleep 35
+          python -m memory_profiler scripts/memory_intensive_task.py > memory-profile.txt
+
+      - name: Run Node.js performance profiling
+        run: |
+          node --prof scripts/sample_frontend.js
+          node --prof-process isolate-*.v8.log > node-profile.txt
+          clinic doctor -- node scripts/sample_frontend.js > clinic-report.json
+
+      - name: Run Flutter performance profiling
+        run: |
+          flutter test --profile --reporter=json > flutter-profile.json
+          flutter build web --profile --web-renderer canvaskit
+          flutter build apk --profile
+
+      - name: Analyze performance bottlenecks
+        run: |
+          python scripts/analyze_performance_bottlenecks.py \
+            --python-profile python-profile.svg \
+            --memory-profile memory-profile.txt \
+            --node-profile node-profile.txt \
+            --flutter-profile flutter-profile.json \
+            --output performance-analysis.json
+
+      - name: Upload profiling reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-profiling-reports
+          path: |
+            python-profile.svg
+            memory-profile.txt
+            node-profile.txt
+            clinic-report.json
+            flutter-profile.json
+            performance-analysis.json
+
+  database-performance-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'database' || github.event.inputs.optimization_type == 'all'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install database performance tools
+        run: |
+          pip install psycopg2-binary sqlalchemy
+          pip install -r requirements.txt
+
+      - name: Wait for databases
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          until redis-cli ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+      - name: Run database performance analysis
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          
+          # Analyze slow queries
+          python scripts/analyze_slow_queries.py \
+            --database-url $DATABASE_URL \
+            --output slow-queries-analysis.json
+          
+          # Analyze database performance
+          python scripts/analyze_database_performance.py \
+            --database-url $DATABASE_URL \
+            --output database-performance-analysis.json
+          
+          # Analyze Redis performance
+          python scripts/analyze_redis_performance.py \
+            --redis-url $REDIS_URL \
+            --output redis-performance-analysis.json
+
+      - name: Optimize database queries
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          
+          # Generate query optimization recommendations
+          python scripts/generate_query_optimizations.py \
+            --database-url $DATABASE_URL \
+            --output query-optimizations.json
+          
+          # Create optimized indexes
+          python scripts/create_optimized_indexes.py \
+            --database-url $DATABASE_URL \
+            --output index-optimizations.json
+
+      - name: Test database performance improvements
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          
+          # Run performance tests
+          python scripts/test_database_performance.py \
+            --database-url $DATABASE_URL \
+            --redis-url $REDIS_URL \
+            --output database-performance-test-results.json
+
+      - name: Generate database optimization report
+        run: |
+          python scripts/generate_database_optimization_report.py \
+            --slow-queries slow-queries-analysis.json \
+            --performance database-performance-analysis.json \
+            --redis redis-performance-analysis.json \
+            --optimizations query-optimizations.json \
+            --indexes index-optimizations.json \
+            --test-results database-performance-test-results.json \
+            --output database-optimization-report.json
+
+      - name: Upload database optimization reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: database-optimization-reports
+          path: |
+            slow-queries-analysis.json
+            database-performance-analysis.json
+            redis-performance-analysis.json
+            query-optimizations.json
+            index-optimizations.json
+            database-performance-test-results.json
+            database-optimization-report.json
+
+  api-performance-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'api' || github.event.inputs.optimization_type == 'all'
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install API performance tools
+        run: |
+          pip install pytest pytest-asyncio
+          pip install httpx
+          pip install fastapi uvicorn
+          pip install locust
+          pip install -r requirements.txt
+
+      - name: Wait for services
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          until redis-cli ping; do
+            echo "Waiting for Redis..."
+            sleep 2
+          done
+
+      - name: Start API server
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          export REDIS_URL="redis://localhost:6379"
+          uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+          sleep 10
+
+      - name: Run API performance analysis
+        run: |
+          # Analyze API response times
+          python scripts/analyze_api_performance.py \
+            --base-url http://localhost:8000 \
+            --output api-performance-analysis.json
+          
+          # Analyze endpoint performance
+          python scripts/analyze_endpoint_performance.py \
+            --base-url http://localhost:8000 \
+            --output endpoint-performance-analysis.json
+
+      - name: Run API load testing
+        run: |
+          locust -f tests/performance/api/locustfile.py \
+            --headless \
+            --users 100 \
+            --spawn-rate 10 \
+            --run-time 60s \
+            --host http://localhost:8000 \
+            --html api-load-test-report.html \
+            --csv api-load-test-results.csv
+
+      - name: Optimize API endpoints
+        run: |
+          # Generate API optimization recommendations
+          python scripts/generate_api_optimizations.py \
+            --performance-analysis api-performance-analysis.json \
+            --endpoint-analysis endpoint-performance-analysis.json \
+            --load-test-results api-load-test-results.csv \
+            --output api-optimizations.json
+
+      - name: Test API performance improvements
+        run: |
+          # Run performance tests with optimizations
+          python scripts/test_api_optimizations.py \
+            --base-url http://localhost:8000 \
+            --optimizations api-optimizations.json \
+            --output api-optimization-test-results.json
+
+      - name: Generate API optimization report
+        run: |
+          python scripts/generate_api_optimization_report.py \
+            --performance-analysis api-performance-analysis.json \
+            --endpoint-analysis endpoint-performance-analysis.json \
+            --load-test-results api-load-test-results.csv \
+            --optimizations api-optimizations.json \
+            --test-results api-optimization-test-results.json \
+            --output api-optimization-report.json
+
+      - name: Upload API optimization reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-optimization-reports
+          path: |
+            api-performance-analysis.json
+            endpoint-performance-analysis.json
+            api-load-test-report.html
+            api-load-test-results.csv
+            api-optimizations.json
+            api-optimization-test-results.json
+            api-optimization-report.json
+
+  frontend-performance-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'frontend' || github.event.inputs.optimization_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Install frontend performance tools
+        run: |
+          npm install -g lighthouse-cli
+          npm install -g webpack-bundle-analyzer
+          flutter pub get
+
+      - name: Build web application
+        run: |
+          flutter build web --profile --web-renderer canvaskit
+
+      - name: Run Lighthouse performance audit
+        run: |
+          # Start web server
+          cd build/web && python -m http.server 8080 &
+          sleep 5
+          
+          # Run Lighthouse audit
+          lighthouse http://localhost:8080 \
+            --output=json \
+            --output-path=lighthouse-report.json \
+            --chrome-flags="--headless"
+          
+          lighthouse http://localhost:8080 \
+            --output=html \
+            --output-path=lighthouse-report.html \
+            --chrome-flags="--headless"
+
+      - name: Analyze bundle size
+        run: |
+          # Analyze JavaScript bundle
+          webpack-bundle-analyzer build/web/main.dart.js \
+            --mode=json \
+            --output=bundle-analysis.json
+
+      - name: Optimize frontend assets
+        run: |
+          # Generate asset optimization recommendations
+          python scripts/generate_frontend_optimizations.py \
+            --lighthouse-report lighthouse-report.json \
+            --bundle-analysis bundle-analysis.json \
+            --output frontend-optimizations.json
+
+      - name: Apply frontend optimizations
+        run: |
+          # Apply optimizations
+          python scripts/apply_frontend_optimizations.py \
+            --optimizations frontend-optimizations.json \
+            --build-dir build/web
+
+      - name: Rebuild with optimizations
+        run: |
+          flutter build web --release --web-renderer canvaskit
+
+      - name: Test optimized performance
+        run: |
+          # Re-run Lighthouse on optimized build
+          cd build/web && python -m http.server 8080 &
+          sleep 5
+          
+          lighthouse http://localhost:8080 \
+            --output=json \
+            --output-path=optimized-lighthouse-report.json \
+            --chrome-flags="--headless"
+
+      - name: Generate frontend optimization report
+        run: |
+          python scripts/generate_frontend_optimization_report.py \
+            --original-lighthouse lighthouse-report.json \
+            --optimized-lighthouse optimized-lighthouse-report.json \
+            --bundle-analysis bundle-analysis.json \
+            --optimizations frontend-optimizations.json \
+            --output frontend-optimization-report.json
+
+      - name: Upload frontend optimization reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-optimization-reports
+          path: |
+            lighthouse-report.json
+            lighthouse-report.html
+            bundle-analysis.json
+            frontend-optimizations.json
+            optimized-lighthouse-report.json
+            frontend-optimization-report.json
+
+  mobile-performance-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'mobile' || github.event.inputs.optimization_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Install mobile performance tools
+        run: |
+          flutter pub get
+          flutter pub add dev:flutter_driver
+
+      - name: Build mobile applications
+        run: |
+          flutter build apk --profile
+          flutter build ios --profile
+
+      - name: Run mobile performance tests
+        run: |
+          # Run Flutter driver tests
+          flutter test --profile integration_test/app_test.dart \
+            --driver integration_test/driver.dart \
+            --output=mobile-performance-results.json
+
+      - name: Analyze mobile performance
+        run: |
+          python scripts/analyze_mobile_performance.py \
+            --flutter-results mobile-performance-results.json \
+            --output mobile-performance-analysis.json
+
+      - name: Optimize mobile performance
+        run: |
+          # Generate mobile optimization recommendations
+          python scripts/generate_mobile_optimizations.py \
+            --performance-analysis mobile-performance-analysis.json \
+            --output mobile-optimizations.json
+
+      - name: Apply mobile optimizations
+        run: |
+          # Apply mobile-specific optimizations
+          python scripts/apply_mobile_optimizations.py \
+            --optimizations mobile-optimizations.json
+
+      - name: Rebuild with optimizations
+        run: |
+          flutter build apk --release
+          flutter build ios --release
+
+      - name: Test optimized mobile performance
+        run: |
+          flutter test --profile integration_test/app_test.dart \
+            --driver integration_test/driver.dart \
+            --output=optimized-mobile-performance-results.json
+
+      - name: Generate mobile optimization report
+        run: |
+          python scripts/generate_mobile_optimization_report.py \
+            --original-performance mobile-performance-results.json \
+            --optimized-performance optimized-mobile-performance-results.json \
+            --analysis mobile-performance-analysis.json \
+            --optimizations mobile-optimizations.json \
+            --output mobile-optimization-report.json
+
+      - name: Upload mobile optimization reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: mobile-optimization-reports
+          path: |
+            mobile-performance-results.json
+            mobile-performance-analysis.json
+            mobile-optimizations.json
+            optimized-mobile-performance-results.json
+            mobile-optimization-report.json
+
+  infrastructure-performance-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.optimization_type == 'comprehensive' || github.event.inputs.optimization_type == 'infrastructure' || github.event.inputs.optimization_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install infrastructure performance tools
+        run: |
+          pip install -r requirements.txt
+
+      - name: Analyze infrastructure performance
+        run: |
+          # Analyze cloud resource performance
+          python scripts/analyze_infrastructure_performance.py \
+            --output infrastructure-performance-analysis.json
+
+      - name: Optimize cloud resources
+        run: |
+          # Generate infrastructure optimization recommendations
+          python scripts/generate_infrastructure_optimizations.py \
+            --performance-analysis infrastructure-performance-analysis.json \
+            --output infrastructure-optimizations.json
+
+      - name: Test infrastructure optimizations
+        run: |
+          # Test infrastructure performance improvements
+          python scripts/test_infrastructure_optimizations.py \
+            --optimizations infrastructure-optimizations.json \
+            --output infrastructure-optimization-test-results.json
+
+      - name: Generate infrastructure optimization report
+        run: |
+          python scripts/generate_infrastructure_optimization_report.py \
+            --performance-analysis infrastructure-performance-analysis.json \
+            --optimizations infrastructure-optimizations.json \
+            --test-results infrastructure-optimization-test-results.json \
+            --output infrastructure-optimization-report.json
+
+      - name: Upload infrastructure optimization reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-optimization-reports
+          path: |
+            infrastructure-performance-analysis.json
+            infrastructure-optimizations.json
+            infrastructure-optimization-test-results.json
+            infrastructure-optimization-report.json
+
+  comprehensive-performance-report:
+    needs: [performance-profiling, database-performance-optimization, api-performance-optimization, frontend-performance-optimization, mobile-performance-optimization, infrastructure-performance-optimization]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all performance reports
+        uses: actions/download-artifact@v3
+        with:
+          path: performance-reports
+
+      - name: Generate comprehensive performance report
+        run: |
+          python scripts/generate_comprehensive_performance_report.py \
+            --input-dir performance-reports \
+            --output comprehensive-performance-optimization-report.json
+
+      - name: Upload comprehensive performance report
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-performance-report
+          path: comprehensive-performance-optimization-report.json
+
+  notify-performance-team:
+    needs: [comprehensive-performance-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-performance-report
+          path: report
+
+      - name: Notify performance team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.PERFORMANCE_WEBHOOK_URL;
+            const optimizationType = '${{ github.event.inputs.optimization_type || 'scheduled' }}';
+            const target = '${{ github.event.inputs.target || 'full' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `⚡ Performance Optimization Completed: ${optimizationType}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Optimization Type',
+                      value: optimizationType,
+                      short: true
+                    }, {
+                      title: 'Target',
+                      value: target,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-performance-dashboard:
+    needs: [comprehensive-performance-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-performance-report
+          path: report
+
+      - name: Update performance dashboard
+        run: |
+          echo "Updating performance dashboard with latest optimization results..."
+          # Add dashboard update logic here
+
+      - name: Update performance metrics
+        run: |
+          echo "Updating performance metrics..."
+          # Add metrics update logic here
+
+  create-performance-issues:
+    needs: [comprehensive-performance-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-performance-report
+          path: report
+
+      - name: Create performance optimization issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('report/comprehensive-performance-optimization-report.json', 'utf8'));
+            
+            // Create issues for critical performance issues
+            if (report.critical_issues && report.critical_issues.length > 0) {
+              for (const issue of report.critical_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `⚡ Performance Issue: ${issue.title}`,
+                  body: `## Performance Issue\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**Component**: ${issue.component}\n\n**Current Performance**: ${issue.current_performance}\n\n**Target Performance**: ${issue.target_performance}\n\n**Recommendation**: ${issue.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['performance', 'critical', 'optimization-needed']
+                });
+              }
+            }
+
+  cleanup:
+    needs: [performance-profiling, database-performance-optimization, api-performance-optimization, frontend-performance-optimization, mobile-performance-optimization, infrastructure-performance-optimization]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup performance artifacts
+        run: |
+          echo "Cleaning up performance optimization artifacts..."
+          # Add cleanup logic here

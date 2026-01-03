@@ -1,0 +1,550 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Code Quality and Review Automation
+on:
+  push:
+    branches: [main, develop, feature/*, hotfix/*]
+    paths:
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+      - '**/*.java'
+      - '**/*.kt'
+      - '**/*.swift'
+      - '**/*.go'
+      - '**/*.rs'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+      - '**/*.dart'
+      - '**/*.java'
+      - '**/*.kt'
+      - '**/*.swift'
+      - '**/*.go'
+      - '**/*.rs'
+  workflow_dispatch:
+    inputs:
+      review_type:
+        description: 'Type of code review to perform'
+        required: true
+        type: choice
+        options:
+          - 'comprehensive'
+          - 'security'
+          - 'performance'
+          - 'quality'
+          - 'documentation'
+          - 'testing'
+          - 'all'
+      focus_area:
+        description: 'Area to focus on'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'backend'
+          - 'frontend'
+          - 'mobile'
+          - 'infrastructure'
+          - 'tests'
+          - 'documentation'
+
+jobs:
+  code-quality-analysis:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'quality' || github.event.inputs.review_type == 'all' || github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Setup Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install code quality tools
+        run: |
+          pip install black isort flake8 mypy bandit safety
+          pip install pylint pydocstyle pycodestyle
+          pip install pre-commit
+          npm install -g eslint prettier
+          npm install -g jshint
+          flutter pub get
+
+      - name: Run Python code quality checks
+        run: |
+          # Code formatting
+          black --check --diff .
+          isort --check-only --diff .
+          
+          # Linting
+          flake8 --format=json --output-file=flake8-report.json .
+          pylint --output-format=json . > pylint-report.json || true
+          mypy --json-report mypy-report . || true
+          
+          # Security
+          bandit -r . -f json -o bandit-quality-report.json
+          safety check --json --output safety-quality-report.json
+          
+          # Documentation
+          pydocstyle --match='(?!test_).*\.py' . > pydocstyle-report.txt || true
+
+      - name: Run JavaScript/TypeScript code quality checks
+        run: |
+          # Linting
+          eslint --format=json --output-file=eslint-report.json . || true
+          jshint --reporter=json . > jshint-report.json || true
+          
+          # Formatting
+          prettier --check --format=json . > prettier-report.json || true
+
+      - name: Run Flutter code quality checks
+        run: |
+          # Analysis
+          flutter analyze --format=json > flutter-analysis.json || true
+          
+          # Formatting
+          dart format --set-exit-if-changed .
+          
+          # Linting
+          flutter analyze --fatal-infos > flutter-lint-report.txt || true
+
+      - name: Run Java/Kotlin code quality checks
+        run: |
+          # Find Java/Kotlin files
+          find . -name "*.java" -o -name "*.kt" | head -10 > java-files.txt || true
+          
+          # Run basic checks if files exist
+          if [ -s java-files.txt ]; then
+            echo "Found Java/Kotlin files, running quality checks..."
+            # Add Java/Kotlin quality tools here
+          fi
+
+      - name: Generate code quality report
+        run: |
+          python scripts/generate_code_quality_report.py \
+            --flake8 flake8-report.json \
+            --pylint pylint-report.json \
+            --mypy mypy-report/mypy-report.json \
+            --bandit bandit-quality-report.json \
+            --safety safety-quality-report.json \
+            --eslint eslint-report.json \
+            --jshint jshint-report.json \
+            --prettier prettier-report.json \
+            --flutter flutter-analysis.json \
+            --output comprehensive-code-quality-report.json
+
+      - name: Upload code quality reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-quality-reports
+          path: |
+            flake8-report.json
+            pylint-report.json
+            mypy-report/mypy-report.json
+            bandit-quality-report.json
+            safety-quality-report.json
+            eslint-report.json
+            jshint-report.json
+            prettier-report.json
+            flutter-analysis.json
+            comprehensive-code-quality-report.json
+
+  automated-code-review:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'all' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install code review tools
+        run: |
+          pip install gitpython
+          pip install requests
+          pip install -r requirements.txt
+
+      - name: Analyze code changes
+        run: |
+          python scripts/analyze_code_changes.py \
+            --base-branch ${{ github.base_ref || 'main' }} \
+            --head-branch ${{ github.head_ref || github.ref_name }} \
+            --output code-changes-analysis.json
+
+      - name: Generate automated review comments
+        run: |
+          python scripts/generate_automated_review.py \
+            --code-changes code-changes-analysis.json \
+            --quality-report comprehensive-code-quality-report.json \
+            --output automated-review-comments.json
+
+      - name: Post automated review comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const reviewComments = JSON.parse(fs.readFileSync('automated-review-comments.json', 'utf8'));
+            
+            // Post review comments to the pull request
+            if (context.payload.pull_request) {
+              for (const comment of reviewComments.comments) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: comment.body
+                });
+              }
+            }
+
+  security-code-review:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'security' || github.event.inputs.review_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install security review tools
+        run: |
+          pip install bandit safety semgrep
+          npm install -g audit-ci
+          pip install -r requirements.txt
+
+      - name: Run security code analysis
+        run: |
+          # Static analysis
+          bandit -r . -f json -o bandit-security-review.json
+          safety check --json --output safety-security-review.json
+          semgrep --config=auto --json --output=semgrep-security-review.json .
+          
+          # Dependency security
+          npm audit --json > npm-audit-security-review.json || true
+          audit-ci --moderate
+
+      - name: Generate security review report
+        run: |
+          python scripts/generate_security_review_report.py \
+            --bandit bandit-security-review.json \
+            --safety safety-security-review.json \
+            --semgrep semgrep-security-review.json \
+            --npm-audit npm-audit-security-review.json \
+            --output security-code-review-report.json
+
+      - name: Upload security review reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-review-reports
+          path: |
+            bandit-security-review.json
+            safety-security-review.json
+            semgrep-security-review.json
+            npm-audit-security-review.json
+            security-code-review-report.json
+
+  performance-code-review:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'performance' || github.event.inputs.review_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install performance analysis tools
+        run: |
+          pip install py-spy memory-profiler
+          pip install -r requirements.txt
+
+      - name: Analyze performance implications
+        run: |
+          python scripts/analyze_performance_implications.py \
+            --code-changes code-changes-analysis.json \
+            --output performance-implications-analysis.json
+
+      - name: Generate performance review report
+        run: |
+          python scripts/generate_performance_review_report.py \
+            --performance-analysis performance-implications-analysis.json \
+            --output performance-code-review-report.json
+
+      - name: Upload performance review reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-review-reports
+          path: |
+            performance-implications-analysis.json
+            performance-code-review-report.json
+
+  documentation-review:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'documentation' || github.event.inputs.review_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install documentation review tools
+        run: |
+          pip install pydocstyle
+          pip install -r requirements.txt
+
+      - name: Analyze documentation quality
+        run: |
+          # Python documentation
+          pydocstyle --match='(?!test_).*\.py' . > pydocstyle-doc-review.txt || true
+          
+          # Markdown documentation
+          find . -name "*.md" -exec markdownlint {} \; > markdownlint-report.txt || true
+          
+          # API documentation
+          python scripts/analyze_api_documentation.py \
+            --output api-documentation-analysis.json
+
+      - name: Generate documentation review report
+        run: |
+          python scripts/generate_documentation_review_report.py \
+            --pydocstyle pydocstyle-doc-review.txt \
+            --markdownlint markdownlint-report.txt \
+            --api-docs api-documentation-analysis.json \
+            --output documentation-review-report.json
+
+      - name: Upload documentation review reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: documentation-review-reports
+          path: |
+            pydocstyle-doc-review.txt
+            markdownlint-report.txt
+            api-documentation-analysis.json
+            documentation-review-report.json
+
+  testing-review:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.review_type == 'comprehensive' || github.event.inputs.review_type == 'testing' || github.event.inputs.review_type == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+
+      - name: Install testing review tools
+        run: |
+          pip install pytest pytest-cov pytest-mock
+          pip install -r requirements.txt
+          flutter pub get
+
+      - name: Analyze test quality
+        run: |
+          # Python tests
+          pytest --cov=. --cov-report=json --cov-report=html tests/ || true
+          
+          # Flutter tests
+          flutter test --coverage --coverage-json coverage.json || true
+          
+          # Test analysis
+          python scripts/analyze_test_quality.py \
+            --python-coverage coverage.json \
+            --flutter-coverage coverage.json \
+            --output test-quality-analysis.json
+
+      - name: Generate testing review report
+        run: |
+          python scripts/generate_testing_review_report.py \
+            --test-analysis test-quality-analysis.json \
+            --output testing-review-report.json
+
+      - name: Upload testing review reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: testing-review-reports
+          path: |
+            coverage.json
+            test-quality-analysis.json
+            testing-review-report.json
+
+  comprehensive-review-summary:
+    needs: [code-quality-analysis, automated-code-review, security-code-review, performance-code-review, documentation-review, testing-review]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all review reports
+        uses: actions/download-artifact@v3
+        with:
+          path: review-reports
+
+      - name: Generate comprehensive review summary
+        run: |
+          python scripts/generate_comprehensive_review_summary.py \
+            --input-dir review-reports \
+            --output comprehensive-review-summary.json
+
+      - name: Upload comprehensive review summary
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-review-summary
+          path: comprehensive-review-summary.json
+
+  notify-review-team:
+    needs: [comprehensive-review-summary]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive summary
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-review-summary
+          path: summary
+
+      - name: Notify review team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.REVIEW_WEBHOOK_URL;
+            const reviewType = '${{ github.event.inputs.review_type || 'automated' }}';
+            const focusArea = '${{ github.event.inputs.focus_area || 'all' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔍 Code Review Completed: ${reviewType}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Review Type',
+                      value: reviewType,
+                      short: true
+                    }, {
+                      title: 'Focus Area',
+                      value: focusArea,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  create-review-issues:
+    needs: [comprehensive-review-summary]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive summary
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-review-summary
+          path: summary
+
+      - name: Create review issues for critical findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('summary/comprehensive-review-summary.json', 'utf8'));
+            
+            // Create issues for critical review findings
+            if (summary.critical_issues && summary.critical_issues.length > 0) {
+              for (const issue of summary.critical_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🔍 Code Review Issue: ${issue.title}`,
+                  body: `## Code Review Finding\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**File**: ${issue.file}\n\n**Line**: ${issue.line}\n\n**Recommendation**: ${issue.recommendation}\n\n**Review**: [View Full Review](${context.payload.html_url})`,
+                  labels: ['code-review', 'critical', 'automated-finding']
+                });
+              }
+            }
+
+  update-quality-dashboard:
+    needs: [comprehensive-review-summary]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive summary
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-review-summary
+          path: summary
+
+      - name: Update quality dashboard
+        run: |
+          echo "Updating code quality dashboard with latest review results..."
+          # Add dashboard update logic here
+
+      - name: Update quality metrics
+        run: |
+          echo "Updating quality metrics..."
+          # Add metrics update logic here
+
+  cleanup:
+    needs: [code-quality-analysis, automated-code-review, security-code-review, performance-code-review, documentation-review, testing-review]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup review artifacts
+        run: |
+          echo "Cleaning up code review artifacts..."
+          # Add cleanup logic here

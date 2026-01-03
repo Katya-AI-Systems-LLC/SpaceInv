@@ -1,0 +1,800 @@
+# Bitbucket Pipelines Templates for Space Invaders Enhanced Edition
+
+# Release Management and Deployment Pipeline
+pipelines:
+  custom:
+    release-management:
+      - step:
+          name: 'Release Planning'
+          image: python:3.11
+          script:
+            - echo "🚀 Starting release management..."
+            - pip install semver gitpython
+            - pip install -r requirements.txt
+            
+            # Determine version information
+            - python scripts/determine_release_version.py \
+              --tag "$BITBUCKET_TAG" \
+              --branch "$BITBUCKET_BRANCH" \
+              --output version-info.json
+            
+            # Generate release plan
+            - python scripts/generate_release_plan.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --release-type "$(cat version-info.json | jq -r '.release_type')" \
+              --previous-version "$(cat version-info.json | jq -r '.previous_version')" \
+              --output release-plan.json
+          artifacts:
+            - version-info.json
+            - release-plan.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Release planning completed'
+
+    build-artifacts:
+      - step:
+          name: 'Build Web Application'
+          image: python:3.11
+          script:
+            - echo "🌐 Building web application..."
+            - flutter pub get
+            - npm install
+            - flutter build web --release --web-renderer canvaskit
+            - npm run build:prod
+            - python scripts/package_release_artifacts.py \
+              --platform web \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --build-dir build/ \
+              --output-dir artifacts/
+          artifacts:
+            - artifacts/web/**
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Web application build completed'
+
+      - step:
+          name: 'Build API'
+          image: python:3.11
+          script:
+            - echo "🔌 Building API..."
+            - pip install -r requirements.txt
+            - npm install
+            - npm run build:api
+            - python -m PyInstaller --onefile api/main.py
+            - python scripts/package_release_artifacts.py \
+              --platform api \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --build-dir build/ \
+              --output-dir artifacts/
+          artifacts:
+            - artifacts/api/**
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'API build completed'
+
+      - step:
+          name: 'Build Mobile Applications'
+          image: python:3.11
+          script:
+            - echo "📱 Building mobile applications..."
+            - flutter pub get
+            - flutter build apk --release
+            - flutter build appbundle --release
+            - flutter build ios --release --no-codesign
+            - python scripts/package_release_artifacts.py \
+              --platform mobile \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --build-dir build/ \
+              --output-dir artifacts/
+          artifacts:
+            - artifacts/mobile/**
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Mobile applications build completed'
+
+    security-quality-checks:
+      - step:
+          name: 'Security and Quality Checks'
+          image: python:3.11
+          script:
+            - echo "🔒 Running security and quality checks..."
+            - pip install bandit safety semgrep
+            - npm install -g audit-ci
+            - flutter pub get
+            
+            # Security scans
+            - bandit -r . -f json -o bandit-release-scan.json
+            - safety check --json --output safety-release-scan.json
+            - semgrep --config=auto --json --output=semgrep-release-scan.json .
+            - npm audit --json > npm-audit-release-scan.json || true
+            
+            # Quality checks
+            - flutter analyze --format=json > flutter-release-analysis.json
+            - python scripts/analyze_release_quality.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --output release-quality-report.json
+          artifacts:
+            - bandit-release-scan.json
+            - safety-release-scan.json
+            - semgrep-release-scan.json
+            - npm-audit-release-scan.json
+            - flutter-release-analysis.json
+            - release-quality-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security and quality checks completed'
+
+    integration-testing:
+      - step:
+          name: 'Integration Testing'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🧪 Running integration testing..."
+            - pip install pytest pytest-asyncio
+            - pip install httpx aiohttp
+            - pip install -r requirements.txt
+            - flutter pub get
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Setup test environment
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - export RELEASE_VERSION="$(cat version-info.json | jq -r '.version')"
+            
+            # Start API server
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Start web server
+            - cd artifacts/web && python -m http.server 8080 &
+            - sleep 5
+            
+            # Run integration tests
+            - pytest tests/integration/ \
+              --junitxml=integration-test-results.xml \
+              --html=integration-test-report.html \
+              --self-contained-html \
+              --tb=short \
+              -v
+            
+            # Run end-to-end tests
+            - pytest tests/e2e/ \
+              --junitxml=e2e-test-results.xml \
+              --html=e2e-test-report.html \
+              --self-contained-html \
+              --tb=short \
+              -v
+          artifacts:
+            - integration-test-results.xml
+            - integration-test-report.html
+            - e2e-test-results.xml
+            - e2e-test-report.html
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Integration testing completed'
+
+    create-release:
+      - step:
+          name: 'Create Release'
+          image: python:3.11
+          script:
+            - echo "📦 Creating release..."
+            - pip install -r requirements.txt
+            
+            # Generate release notes
+            - python scripts/generate_release_notes.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --release-plan release-plan.json \
+              --output release-notes.md
+            
+            # Create Bitbucket release
+            - |
+              if [ -n "$BITBUCKET_TAG" ]; then
+                echo "Creating Bitbucket release for tag $BITBUCKET_TAG"
+                # Bitbucket releases are created through the UI or API
+                echo "Release notes:"
+                cat release-notes.md
+              fi
+          artifacts:
+            - release-notes.md
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Release created'
+
+    deploy-staging:
+      - step:
+          name: 'Deploy to Staging'
+          image: python:3.11
+          deployment: staging
+          script:
+            - echo "🚀 Deploying to staging environment..."
+            - pip install -r requirements.txt
+            
+            # Deploy to staging
+            - python scripts/deploy_to_staging.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --artifacts-dir artifacts/ \
+              --environment staging
+            
+            # Run smoke tests
+            - python scripts/run_smoke_tests.py \
+              --environment staging \
+              --version "$(cat version-info.json | jq -r '.version')"
+            
+            # Update staging documentation
+            - python scripts/update_staging_docs.py \
+              --version "$(cat version-info.json | jq -r '.version')"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Deployed to staging environment'
+
+    deploy-production:
+      - step:
+          name: 'Deploy to Production'
+          image: python:3.11
+          deployment: production
+          script:
+            - echo "🚀 Deploying to production environment..."
+            - pip install -r requirements.txt
+            
+            # Deploy to production
+            - python scripts/deploy_to_production.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --artifacts-dir artifacts/ \
+              --environment production
+            
+            # Run production smoke tests
+            - python scripts/run_smoke_tests.py \
+              --environment production \
+              --version "$(cat version-info.json | jq -r '.version')"
+            
+            # Update production documentation
+            - python scripts/update_production_docs.py \
+              --version "$(cat version-info.json | jq -r '.version')"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Deployed to production environment'
+
+    deploy-app-stores:
+      - step:
+          name: 'Deploy to App Stores'
+          image: python:3.11
+          script:
+            - echo "📱 Deploying to app stores..."
+            - pip install -r requirements.txt
+            
+            # Deploy to Google Play
+            - python scripts/deploy_to_app_store.py \
+              --store google-play \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --artifacts-dir artifacts/ \
+              --release-notes release-notes.md
+            
+            # Deploy to Apple App Store
+            - python scripts/deploy_to_app_store.py \
+              --store apple-app-store \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --artifacts-dir artifacts/ \
+              --release-notes release-notes.md
+            
+            # Monitor app store submissions
+            - python scripts/monitor_app_store_submission.py \
+              --store google-play \
+              --version "$(cat version-info.json | jq -r '.version')"
+            
+            - python scripts/monitor_app_store_submission.py \
+              --store apple-app-store \
+              --version "$(cat version-info.json | jq -r '.version')"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Deployed to app stores'
+
+    update-documentation:
+      - step:
+          name: 'Update Documentation'
+          image: python:3.11
+          script:
+            - echo "📚 Updating documentation..."
+            - pip install -r requirements.txt
+            
+            # Update documentation
+            - python scripts/update_documentation.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --release-plan release-plan.json
+            
+            # Deploy documentation
+            - python scripts/deploy_documentation.py \
+              --version "$(cat version-info.json | jq -r '.version')"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Documentation updated'
+
+    post-release-analysis:
+      - step:
+          name: 'Post-Release Analysis'
+          image: python:3.11
+          script:
+            - echo "📊 Generating post-release analysis..."
+            - pip install -r requirements.txt
+            
+            # Generate post-release analysis
+            - python scripts/generate_post_release_analysis.py \
+              --version "$(cat version-info.json | jq -r '.version')" \
+              --reports-dir reports/ \
+              --output post-release-analysis.json
+          artifacts:
+            - post-release-analysis.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Post-release analysis completed'
+
+# DevOps Infrastructure Management Pipeline
+  devops-infrastructure-management:
+    - step:
+        name: 'Infrastructure Validation'
+        image: python:3.11
+        script:
+          - echo "🔧 Starting infrastructure validation..."
+          - pip install terraform ansible ansible-lint
+          - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          - install -o root -g root kubectl /usr/local/bin/kubectl
+          
+          # Validate Terraform
+          - cd terraform/environments/$ENVIRONMENT_NAME
+          - terraform init -backend=false
+          - terraform fmt -check -recursive
+          - terraform validate
+          - terraform plan -out=tfplan
+          - terraform show -json tfplan > terraform-plan.json
+          
+          # Validate Ansible
+          - cd ../../ansible
+          - ansible-lint .
+          - ansible-playbook --syntax-check *.yml
+          - ansible-playbook --check *.yml
+          
+          # Validate Kubernetes
+          - cd ../kubernetes
+          - kubectl apply --dry-run=client -f .
+          - kubeval .
+          - kube-score score . --output-format json > kubernetes-score.json
+        artifacts:
+          - terraform-plan.json
+          - kubernetes-score.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Infrastructure validation completed'
+
+    - step:
+        name: 'Infrastructure Planning'
+        image: python:3.11
+        script:
+          - echo "📋 Planning infrastructure changes..."
+          - pip install terraform terraform-docs
+          - pip install -r requirements.txt
+          
+          # Plan infrastructure
+          - cd terraform/environments/$ENVIRONMENT_NAME
+          - terraform plan -out=tfplan-$ENVIRONMENT_NAME
+          - terraform show -json tfplan-$ENVIRONMENT_NAME > terraform-plan-$ENVIRONMENT_NAME.json
+          - terraform-docs . > infrastructure-docs-$ENVIRONMENT_NAME.md
+          
+          # Analyze costs
+          - python scripts/analyze_infrastructure_costs.py \
+            --environment "$ENVIRONMENT_NAME" \
+            --plan-file terraform-plan-$ENVIRONMENT_NAME.json \
+            --output infrastructure-costs-$ENVIRONMENT_NAME.json
+          
+          # Generate report
+          - python scripts/generate_infrastructure_report.py \
+            --environment "$ENVIRONMENT_NAME" \
+            --plan-file terraform-plan-$ENVIRONMENT_NAME.json \
+            --costs-file infrastructure-costs-$ENVIRONMENT_NAME.json \
+            --output infrastructure-report-$ENVIRONMENT_NAME.json
+        artifacts:
+          - terraform/environments/$ENVIRONMENT_NAME/tfplan-$ENVIRONMENT_NAME
+          - terraform/environments/$ENVIRONMENT_NAME/terraform-plan-$ENVIRONMENT_NAME.json
+          - terraform/environments/$ENVIRONMENT_NAME/infrastructure-docs-$ENVIRONMENT_NAME.md
+          - infrastructure-costs-$ENVIRONMENT_NAME.json
+          - infrastructure-report-$ENVIRONMENT_NAME.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Infrastructure planning completed'
+
+    - step:
+        name: 'Infrastructure Deployment'
+        image: python:3.11
+        deployment: $ENVIRONMENT_NAME
+        script:
+          - echo "🚀 Deploying infrastructure..."
+          - pip install terraform ansible
+          - pip install -r requirements.txt
+          
+          # Deploy infrastructure
+          - cd terraform/environments/$ENVIRONMENT_NAME
+          - terraform apply -auto-approve tfplan-$ENVIRONMENT_NAME
+          
+          # Deploy configurations
+          - cd ../../ansible
+          - ansible-playbook -i inventory/$ENVIRONMENT_NAME playbook.yml
+          
+          # Deploy containers
+          - cd ../docker
+          - docker compose -f docker-compose.$ENVIRONMENT_NAME.yml up -d
+          
+          # Deploy Kubernetes
+          - cd ../kubernetes
+          - kubectl apply -f manifests/$ENVIRONMENT_NAME/
+          
+          # Verify deployment
+          - python scripts/verify_deployment.py \
+            --environment "$ENVIRONMENT_NAME" \
+            --output deployment-verification-$ENVIRONMENT_NAME.json
+          
+          # Run post-deployment tests
+          - python scripts/run_post_deployment_tests.py \
+            --environment "$ENVIRONMENT_NAME" \
+            --output post-deployment-tests-$ENVIRONMENT_NAME.json
+        artifacts:
+          - deployment-verification-$ENVIRONMENT_NAME.json
+          - post-deployment-tests-$ENVIRONMENT_NAME.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Infrastructure deployment completed'
+
+    - step:
+        name: 'Monitoring Setup'
+        image: python:3.11
+        script:
+          - echo "📊 Setting up monitoring..."
+          - pip install prometheus-client grafana-api
+          - pip install -r requirements.txt
+          
+          # Deploy monitoring stack
+          - cd monitoring
+          - docker compose up -d
+          
+          # Configure Prometheus
+          - python scripts/configure_prometheus.py \
+            --config-file prometheus.yml \
+            --output prometheus-config.json
+          
+          # Configure Grafana
+          - python scripts/configure_grafana.py \
+            --config-file grafana/dashboards/ \
+            --output grafana-config.json
+          
+          # Setup alerting
+          - python scripts/setup_alerting_rules.py \
+            --rules-file alerting-rules.yml \
+            --output alerting-config.json
+          
+          # Test monitoring
+          - python scripts/test_monitoring_setup.py \
+            --output monitoring-test-results.json
+        artifacts:
+          - prometheus-config.json
+          - grafana-config.json
+          - alerting-config.json
+          - monitoring-test-results.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Monitoring setup completed'
+
+    - step:
+        name: 'Infrastructure Testing'
+        image: python:3.11
+        script:
+          - echo "🧪 Running infrastructure tests..."
+          - pip install locust pytest
+          - pip install -r requirements.txt
+          
+          # Performance tests
+          - python scripts/run_infrastructure_tests.py \
+            --test-type performance \
+            --environment "$ENVIRONMENT_NAME" \
+            --output infrastructure-test-performance.json
+          
+          # Security tests
+          - python scripts/run_infrastructure_tests.py \
+            --test-type security \
+            --environment "$ENVIRONMENT_NAME" \
+            --output infrastructure-test-security.json
+          
+          # Reliability tests
+          - python scripts/run_infrastructure_tests.py \
+            --test-type reliability \
+            --environment "$ENVIRONMENT_NAME" \
+            --output infrastructure-test-reliability.json
+          
+          # Scalability tests
+          - python scripts/run_infrastructure_tests.py \
+            --test-type scalability \
+            --environment "$ENVIRONMENT_NAME" \
+            --output infrastructure-test-scalability.json
+        artifacts:
+          - infrastructure-test-performance.json
+          - infrastructure-test-security.json
+          - infrastructure-test-reliability.json
+          - infrastructure-test-scalability.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Infrastructure testing completed'
+
+    - step:
+        name: 'Russian Cloud Management'
+        image: python:3.11
+        script:
+          - echo "☁️ Managing Russian cloud infrastructure..."
+          - pip install yandexcloud
+          - pip install -r requirements.txt
+          
+          # Yandex Cloud
+          - python scripts/manage_yandex_cloud_infrastructure.py \
+            --action plan \
+            --environment "$ENVIRONMENT_NAME" \
+            --output yandex-cloud-infrastructure.json
+          
+          - python scripts/verify_yandex_cloud_setup.py \
+            --output yandex-cloud-verification.json
+          
+          # VK Cloud
+          - python scripts/manage_vk_cloud_infrastructure.py \
+            --action plan \
+            --environment "$ENVIRONMENT_NAME" \
+            --output vk-cloud-infrastructure.json
+          
+          - python scripts/verify_vk_cloud_setup.py \
+            --output vk-cloud-verification.json
+          
+          # Selectel
+          - python scripts/manage_selectel_infrastructure.py \
+            --action plan \
+            --environment "$ENVIRONMENT_NAME" \
+            --output selectel-infrastructure.json
+          
+          - python scripts/verify_selectel_setup.py \
+            --output selectel-verification.json
+        artifacts:
+          - yandex-cloud-infrastructure.json
+          - yandex-cloud-verification.json
+          - vk-cloud-infrastructure.json
+          - vk-cloud-verification.json
+          - selectel-infrastructure.json
+          - selectel-verification.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Russian cloud management completed'
+
+# Branch-specific pipelines
+  branches:
+    main:
+      - step:
+          name: 'Production Release'
+          image: python:3.11
+          deployment: production
+          script:
+            - echo "🚀 Running production release..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting production release'
+
+    develop:
+      - step:
+          name: 'Staging Release'
+          image: python:3.11
+          deployment: staging
+          script:
+            - echo "🧪 Running staging release..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting staging release'
+
+# Pull request pipelines
+  pull-requests:
+    - step:
+        name: 'PR Testing and Validation'
+        image: python:3.11
+        script:
+          - echo "🔍 Testing and validating PR #$BITBUCKET_PR_ID..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Testing and validating PR'
+
+# Scheduled pipelines
+  schedules:
+    - cron: '0 4 * * *'  # Daily at 4 AM
+      step:
+        name: 'Daily Infrastructure Management'
+        image: python:3.11
+        script:
+          - echo "🔧 Running daily infrastructure management..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily infrastructure management'
+
+    - cron: '0 2 * * 0'  # Weekly on Sunday at 2 AM
+      step:
+        name: 'Weekly Infrastructure Testing'
+        image: python:3.11
+        script:
+          - echo "🧪 Running weekly infrastructure testing..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting weekly infrastructure testing'
+
+# Definitions for reusable steps and scripts
+definitions:
+  caches:
+    python:
+      key: python-$BITBUCKET_COMMIT
+      paths:
+        - .cache/pip/
+    flutter:
+      key: flutter-$BITBUCKET_COMMIT
+      paths:
+        - .flutter/
+        - .pub-cache/
+    node:
+      key: node-$BITBUCKET_COMMIT
+      paths:
+        - node_modules/
+
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: space_invaders_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+    redis:
+      image: redis:7
+
+  scripts:
+    - &setup-services |
+      echo "Setting up services..."
+      until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+      until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    - &setup-database |
+      echo "Setting up database..."
+      export DATABASE_URL="postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+      export REDIS_URL="redis://redis:6379"
+    - &start-api |
+      echo "Starting API server..."
+      export DATABASE_URL=$DATABASE_URL
+      export REDIS_URL=$REDIS_URL
+      uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+      sleep 10
+    - &notify-slack |
+      pipe: atlassian/slack-notify:0.3.0
+        variables:
+          WEBHOOK_URL: $SLACK_WEBHOOK_URL
+          MESSAGE: '$BITBUCKET_PIPELINE_STATE: $BITBUCKET_COMMIT'
+
+  steps:
+    - step: &infrastructure-validation
+        name: 'Infrastructure Validation'
+        image: python:3.11
+        script:
+          - pip install terraform ansible ansible-lint
+          - terraform init -backend=false
+          - terraform fmt -check -recursive
+          - terraform validate
+          - ansible-lint .
+          - ansible-playbook --syntax-check *.yml
+        artifacts:
+          - terraform-plan.json
+          - kubernetes-score.json
+        after-script:
+          - *notify-slack
+
+    - step: &security-quality-checks
+        name: 'Security and Quality Checks'
+        image: python:3.11
+        script:
+          - pip install bandit safety semgrep
+          - npm install -g audit-ci
+          - flutter pub get
+          - bandit -r . -f json -o bandit-release-scan.json
+          - safety check --json --output safety-release-scan.json
+          - semgrep --config=auto --json --output=semgrep-release-scan.json .
+          - npm audit --json > npm-audit-release-scan.json || true
+          - flutter analyze --format=json > flutter-release-analysis.json
+        artifacts:
+          - bandit-release-scan.json
+          - safety-release-scan.json
+          - semgrep-release-scan.json
+          - npm-audit-release-scan.json
+          - flutter-release-analysis.json
+        after-script:
+          - *notify-slack
+
+    - step: &integration-tests
+        name: 'Integration Tests'
+        image: python:3.11
+        services:
+          - postgres
+          - redis
+        script:
+          - pip install pytest pytest-asyncio httpx
+          - *setup-services
+          - *setup-database
+          - *start-api
+          - pytest tests/integration/ --junitxml=integration-test-results.xml
+          - pytest tests/e2e/ --junitxml=e2e-test-results.xml
+        artifacts:
+          - integration-test-results.xml
+          - e2e-test-results.xml
+        services:
+          - postgres
+          - redis
+        after-script:
+          - *notify-slack

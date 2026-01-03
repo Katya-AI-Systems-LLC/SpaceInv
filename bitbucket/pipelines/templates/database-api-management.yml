@@ -1,0 +1,678 @@
+# Bitbucket Pipelines Templates for Space Invaders Enhanced Edition
+
+# Database Management Pipeline
+pipelines:
+  custom:
+    database-migration:
+      - step:
+          name: 'Database Migration'
+          image: postgres:15
+          services:
+            - postgres:15
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          script:
+            - echo "🗄️ Starting database migration..."
+            - apt-get update -y
+            - apt-get install -y python3 python3-pip
+            - pip3 install psycopg2-binary alembic sqlalchemy
+            - pip3 install -r requirements.txt
+            
+            # Wait for database
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for database..."
+                sleep 2
+              done
+            
+            # Run migrations
+            - export DATABASE_URL=$DATABASE_URL
+            - alembic upgrade head
+            
+            # Verify migration
+            - alembic current
+            - alembic history
+            
+            # Run tests
+            - python3 tests/test_migrations.py
+          artifacts:
+            - migration-report.json
+          services:
+            - postgres
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Database migration completed'
+
+    database-backup:
+      - step:
+          name: 'Database Backup'
+          image: postgres:15
+          services:
+            - postgres:15
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          script:
+            - echo "💾 Starting database backup..."
+            - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            - BACKUP_FILE="space_invaders_backup_${TIMESTAMP}.sql"
+            - pg_dump $DATABASE_URL > $BACKUP_FILE
+            - gzip $BACKUP_FILE
+            
+            # Upload to cloud storage
+            - |
+              if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+                curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+                export PATH=$PATH:$HOME/yandex-cloud/bin
+                
+                yc config profile create sa-profile
+                yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+                yc config set folder-id "$YC_FOLDER_ID"
+                
+                yc storage s3 cp \
+                  --endpoint-url=https://storage.yandexcloud.net \
+                  ${BACKUP_FILE}.gz \
+                  s3://space-invaders-backups/
+              fi
+          artifacts:
+            - ${BACKUP_FILE}.gz
+            - backup-report.json
+          services:
+            - postgres
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Database backup completed'
+
+    database-optimization:
+      - step:
+          name: 'Database Optimization'
+          image: python:3.11
+          services:
+            - postgres:15
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+          script:
+            - echo "⚡ Starting database optimization..."
+            - pip install psycopg2-binary sqlalchemy
+            - pip install -r requirements.txt
+            
+            # Wait for database
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for database..."
+                sleep 2
+              done
+            
+            # Analyze performance
+            - export DATABASE_URL=$DATABASE_URL
+            - python3 scripts/analyze_database_performance.py
+            
+            # Optimize database
+            - python3 scripts/optimize_database.py
+            
+            # Update statistics
+            - python3 scripts/update_statistics.py
+            
+            # Verify optimization
+            - python3 scripts/verify_optimization.py
+          artifacts:
+            - optimization-report.json
+            - performance-report.json
+          services:
+            - postgres
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Database optimization completed'
+
+    api-testing:
+      - step:
+          name: 'API Testing'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "🔌 Starting API testing..."
+            - pip install pytest pytest-cov pytest-asyncio
+            - pip install fastapi uvicorn httpx
+            - pip install locust schemathesis
+            - pip install bandit safety
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Start API server
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Run unit tests
+            - pytest tests/api/unit/ --cov=api --cov-report=xml --cov-report=html --junitxml=api-unit-results.xml
+            
+            # Run integration tests
+            - pytest tests/api/integration/ --junitxml=api-integration-results.xml
+            
+            # Run contract tests
+            - schemathesis run http://localhost:8000/openapi.json --base-url http://localhost:8000 --junitxml=api-contract-results.xml
+            
+            # Run security tests
+            - bandit -r api/ -f json -o bandit-report.json
+            - safety check --json --output safety-report.json
+            - pytest tests/api/security/ --junitxml=api-security-results.xml
+            
+            # Generate documentation
+            - curl -o openapi.json http://localhost:8000/openapi.json
+            - pip install redoc-cli
+            - redoc-cli build openapi.json --output api-documentation.html
+            
+            # Generate client SDKs
+            - pip install openapi-generator
+            - openapi-generator-cli generate -i openapi.json -g python -o client-sdks/python
+          artifacts:
+            - api-unit-results.xml
+            - api-integration-results.xml
+            - api-contract-results.xml
+            - api-security-results.xml
+            - bandit-report.json
+            - safety-report.json
+            - openapi.json
+            - api-documentation.html
+            - client-sdks/
+            - htmlcov/
+            - coverage.xml
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'API testing completed'
+
+    api-load-testing:
+      - step:
+          name: 'API Load Testing'
+          image: python:3.11
+          services:
+            - postgres:15
+            - redis:7
+          variables:
+            POSTGRES_DB: space_invaders_test
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: postgres
+            DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+            REDIS_URL: "redis://redis:6379"
+          script:
+            - echo "⚡ Starting API load testing..."
+            - pip install locust
+            - pip install fastapi uvicorn
+            - pip install -r requirements.txt
+            
+            # Wait for services
+            - until pg_isready -h postgres -p 5432 -U postgres; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+            - until redis-cli -h redis ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+            
+            # Start API server
+            - export DATABASE_URL=$DATABASE_URL
+            - export REDIS_URL=$REDIS_URL
+            - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+            - sleep 10
+            
+            # Run load tests
+            - locust -f tests/api/load/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host http://localhost:8000 --html load-test-report.html --csv load-test-results.csv
+          artifacts:
+            - load-test-report.html
+            - load-test-results.csv
+            - load-test-report.json
+          services:
+            - postgres
+            - redis
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'API load testing completed'
+
+    russian-cloud-database:
+      - step:
+          name: 'Russian Cloud Database Integration'
+          image: alpine:latest
+          script:
+            - echo "☁️ Starting Russian Cloud Database Integration..."
+            - apk add --no-cache curl jq python3 py3-pip
+            - pip3 install psycopg2-binary
+            
+            # Yandex Database
+            - |
+              if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+                echo "🇷🇺 Testing Yandex Database..."
+                python3 scripts/test_ydb_connection.py --config ydb-config.json
+                echo "✅ Yandex Database integration completed"
+              fi
+            
+            # VK Cloud Database
+            - |
+              if [ -n "$VK_CLOUD_TOKEN" ]; then
+                echo "☁️ Testing VK Cloud Database..."
+                python3 scripts/test_vk_database.py --token "$VK_CLOUD_TOKEN" --endpoint "$VK_CLOUD_DATABASE_ENDPOINT"
+                echo "✅ VK Cloud Database integration completed"
+              fi
+            
+            # Selectel Database
+            - |
+              if [ -n "$SELECTEL_DATABASE_HOST" ]; then
+                echo "☁️ Testing Selectel Database..."
+                python3 scripts/test_selectel_database.py --host "$SELECTEL_DATABASE_HOST" --user "$SELECTEL_DATABASE_USER" --password "$SELECTEL_DATABASE_PASSWORD"
+                echo "✅ Selectel Database integration completed"
+              fi
+          artifacts:
+            - database-integration-report.json
+            - ydb-config.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Russian Cloud Database integration completed'
+
+    russian-cloud-api:
+      - step:
+          name: 'Russian Cloud API Integration'
+          image: python:3.11
+          script:
+            - echo "☁️ Starting Russian Cloud API Integration..."
+            - pip install httpx pytest
+            - pip install -r requirements.txt
+            
+            # Test Yandex Cloud API
+            - |
+              if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+                echo "🇷🇺 Testing Yandex Cloud API..."
+                pytest tests/api/russian-clouds/test_yandex_api.py --junitxml=yandex-api-results.xml
+                echo "✅ Yandex Cloud API testing completed"
+              fi
+            
+            # Test VK Cloud API
+            - |
+              if [ -n "$VK_CLOUD_TOKEN" ]; then
+                echo "☁️ Testing VK Cloud API..."
+                pytest tests/api/russian-clouds/test_vk_api.py --junitxml=vk-api-results.xml
+                echo "✅ VK Cloud API testing completed"
+              fi
+            
+            # Test Selectel API
+            - |
+              if [ -n "$SELECTEL_TOKEN" ]; then
+                echo "☁️ Testing Selectel API..."
+                pytest tests/api/russian-clouds/test_selectel_api.py --junitxml=selectel-api-results.xml
+                echo "✅ Selectel API testing completed"
+              fi
+          artifacts:
+            - api-integration-report.json
+            - yandex-api-results.xml
+            - vk-api-results.xml
+            - selectel-api-results.xml
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Russian Cloud API integration completed'
+
+    multi-cloud-backup:
+      - step:
+          name: 'Multi-Cloud Backup'
+          image: alpine:latest
+          script:
+            - echo "💾 Starting Multi-Cloud Backup..."
+            - apk add --no-cache curl jq python3 py3-pip postgresql-client
+            - pip3 install psycopg2-binary
+            
+            # Create backup
+            - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+            - BACKUP_FILE="space_invaders_backup_${TIMESTAMP}.sql"
+            - pg_dump $DATABASE_URL > $BACKUP_FILE
+            - gzip $BACKUP_FILE
+            
+            # Upload to all Russian cloud providers
+            - echo "☁️ Uploading to Russian Cloud providers..."
+            
+            # Yandex Cloud
+            - |
+              if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+                curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+                export PATH=$PATH:$HOME/yandex-cloud/bin
+                
+                yc config profile create sa-profile
+                yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+                yc config set folder-id "$YC_FOLDER_ID"
+                
+                yc storage s3 cp \
+                  --endpoint-url=https://storage.yandexcloud.net \
+                  ${BACKUP_FILE}.gz \
+                  s3://space-invaders-backups/
+                
+                echo "✅ Backup uploaded to Yandex Cloud"
+              fi
+            
+            # VK Cloud
+            - |
+              if [ -n "$VK_CLOUD_TOKEN" ]; then
+                curl -X POST "$VK_CLOUD_STORAGE_URL" \
+                  -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+                  -F "file=@${BACKUP_FILE}.gz"
+                
+                echo "✅ Backup uploaded to VK Cloud"
+              fi
+            
+            # Selectel
+            - |
+              if [ -n "$SELECTEL_USERNAME" ]; then
+                pip3 install selectel-storage-cli
+                
+                mkdir -p ~/.config/selectel
+                cat > ~/.config/selectel/config.yaml << EOF
+                auth_url: https://api.selcdn.ru
+                username: $SELECTEL_USERNAME
+                password: $SELECTEL_PASSWORD
+                container_name: space-invaders-backups
+                EOF
+                
+                selectel-storage upload \
+                  --source ${BACKUP_FILE}.gz \
+                  --destination /backups/
+                
+                echo "✅ Backup uploaded to Selectel"
+              fi
+            
+            # Cleanup
+            - rm ${BACKUP_FILE}.gz
+          artifacts:
+            - multi-cloud-backup-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Multi-cloud backup completed'
+
+    database-security-scan:
+      - step:
+          name: 'Database Security Scan'
+          image: python:3.11
+          script:
+            - echo "🔒 Starting Database Security Scan..."
+            - pip install bandit safety
+            - pip install psycopg2-binary
+            - pip install -r requirements.txt
+            
+            # Scan database code
+            - bandit -r database/ -f json -o database-bandit-report.json
+            - safety check --json --output database-safety-report.json
+            
+            # Check permissions
+            - python3 scripts/check_database_permissions.py --output database-permissions-report.json
+            
+            # Audit access
+            - python3 scripts/audit_database_access.py --output database-access-report.json
+            
+            # Check encryption
+            - python3 scripts/check_database_encryption.py --output database-encryption-report.json
+          artifacts:
+            - database-security-report.json
+            - database-bandit-report.json
+            - database-safety-report.json
+            - database-permissions-report.json
+            - database-access-report.json
+            - database-encryption-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Database security scan completed'
+
+# Branch-specific pipelines
+  branches:
+    main:
+      - step:
+          name: 'Database Management - Production'
+          image: postgres:15
+          services:
+            - postgres:15
+          deployment: production
+          script:
+            - echo "🗄️ Production database management..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting production database management'
+
+    develop:
+      - step:
+          name: 'Database Management - Staging'
+          image: postgres:15
+          services:
+            - postgres:15
+          deployment: staging
+          script:
+            - echo "🗄️ Staging database management..."
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Starting staging database management'
+
+# Pull request pipelines
+  pull-requests:
+    - step:
+        name: 'Database and API Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        script:
+          - echo "🧪 Testing database and API changes..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Testing database and API changes for PR #$BITBUCKET_PR_ID'
+
+# Scheduled pipelines
+  schedules:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+      step:
+        name: 'Daily Database Management'
+        image: postgres:15
+        services:
+          - postgres:15
+        script:
+          - echo "🗄️ Daily database management..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily database management'
+
+    - cron: '0 4 * * *'  # Daily at 4 AM
+      step:
+        name: 'Daily API Testing'
+        image: python:3.11
+        services:
+          - postgres:15
+          - redis:7
+        script:
+          - echo "🔌 Daily API testing..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily API testing'
+
+    - cron: '0 5 * * *'  # Daily at 5 AM
+      step:
+        name: 'Daily Russian Cloud Integration'
+        image: alpine:latest
+        script:
+          - echo "☁️ Daily Russian Cloud integration..."
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Starting daily Russian Cloud integration'
+
+# Definitions for reusable steps and scripts
+definitions:
+  caches:
+    python:
+      key: python-$BITBUCKET_COMMIT
+      paths:
+        - .cache/pip/
+    postgres:
+      key: postgres-$BITBUCKET_COMMIT
+      paths:
+        - .postgres/
+
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: space_invaders_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+    redis:
+      image: redis:7
+
+  scripts:
+    - &setup-database |
+      echo "Setting up database..."
+      until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for database..."
+        sleep 2
+      done
+    - &setup-api |
+      echo "Setting up API..."
+      export DATABASE_URL=$DATABASE_URL
+      export REDIS_URL=$REDIS_URL
+      uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+      sleep 10
+    - &notify-slack |
+      pipe: atlassian/slack-notify:0.3.0
+        variables:
+          WEBHOOK_URL: $SLACK_WEBHOOK_URL
+          MESSAGE: '$BITBUCKET_PIPELINE_STATE: $BITBUCKET_COMMIT'
+
+  steps:
+    - step: &database-migration
+        name: 'Database Migration'
+        image: postgres:15
+        services:
+          - postgres
+        script:
+          - *setup-database
+          - apt-get update -y
+          - apt-get install -y python3 python3-pip
+          - pip3 install psycopg2-binary alembic sqlalchemy
+          - pip3 install -r requirements.txt
+          - export DATABASE_URL=$DATABASE_URL
+          - alembic upgrade head
+          - alembic current
+          - alembic history
+          - python3 tests/test_migrations.py
+        artifacts:
+          - migration-report.json
+        after-script:
+          - *notify-slack
+
+    - step: &api-testing
+        name: 'API Testing'
+        image: python:3.11
+        services:
+          - postgres
+          - redis
+        script:
+          - pip install pytest pytest-cov pytest-asyncio
+          - pip install fastapi uvicorn httpx
+          - pip install locust schemathesis
+          - pip install bandit safety
+          - pip install -r requirements.txt
+          - *setup-database
+          - *setup-api
+          - pytest tests/api/unit/ --cov=api --cov-report=xml --cov-report=html --junitxml=api-unit-results.xml
+          - pytest tests/api/integration/ --junitxml=api-integration-results.xml
+          - schemathesis run http://localhost:8000/openapi.json --base-url http://localhost:8000 --junitxml=api-contract-results.xml
+          - bandit -r api/ -f json -o bandit-report.json
+          - safety check --json --output safety-report.json
+          - pytest tests/api/security/ --junitxml=api-security-results.xml
+          - curl -o openapi.json http://localhost:8000/openapi.json
+          - pip install redoc-cli
+          - redoc-cli build openapi.json --output api-documentation.html
+          - pip install openapi-generator
+          - openapi-generator-cli generate -i openapi.json -g python -o client-sdks/python
+        artifacts:
+          - api-unit-results.xml
+          - api-integration-results.xml
+          - api-contract-results.xml
+          - api-security-results.xml
+          - bandit-report.json
+          - safety-report.json
+          - openapi.json
+          - api-documentation.html
+          - client-sdks/
+          - htmlcov/
+          - coverage.xml
+        after-script:
+          - *notify-slack
+
+    - step: &russian-cloud-integration
+        name: 'Russian Cloud Integration'
+        image: alpine:latest
+        script:
+          - echo "☁️ Starting Russian Cloud integration..."
+          - apk add --no-cache curl jq python3 py3-pip
+          - pip3 install psycopg2-binary
+          - |
+            if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+              echo "🇷🇺 Testing Yandex Cloud..."
+              python3 scripts/test_ydb_connection.py --config ydb-config.json
+            fi
+          - |
+            if [ -n "$VK_CLOUD_TOKEN" ]; then
+              echo "☁️ Testing VK Cloud..."
+              python3 scripts/test_vk_database.py --token "$VK_CLOUD_TOKEN" --endpoint "$VK_CLOUD_DATABASE_ENDPOINT"
+            fi
+          - |
+            if [ -n "$SELECTEL_DATABASE_HOST" ]; then
+              echo "☁️ Testing Selectel..."
+              python3 scripts/test_selectel_database.py --host "$SELECTEL_DATABASE_HOST" --user "$SELECTEL_DATABASE_USER" --password "$SELECTEL_DATABASE_PASSWORD"
+            fi
+        artifacts:
+          - database-integration-report.json
+          - ydb-config.json
+        after-script:
+          - *notify-slack

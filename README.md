@@ -1,265 +1,284 @@
-# Space Invaders Game
+# Space Invaders Enhanced Edition 🚀
 
-A Flutter implementation of the classic Space Invaders arcade game with modern improvements and features.
+A modern Flutter implementation of the classic Space Invaders arcade game with comprehensive enhancements and advanced features.
 
-https://api.codemagic.io/apps/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/status_badge.svg
+[![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat&logo=flutter)](https://flutter.dev/)
+[![Dart](https://img.shields.io/badge/Dart-0175C2?style=flat&logo=dart)](https://dart.dev/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/Platform-Web%20%7C%20Windows%20%7C%20Android%20%7C%20iOS-lightgrey.svg)](https://flutter.dev/)
 
-[![Codemagic build status](https://api.codemagic.io/apps/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/status_badge.svg)](https://codemagic.io/app/6957cc293ad680c4d5781fa3/6957cc293ad680c4d5781fa2/latest_build)
+## 🎮 Game Overview
 
-## Features
+Space Invaders Enhanced Edition transforms the classic arcade game into a modern, feature-rich space shooter with **50+ enhancements** including advanced weapon systems, special abilities, environmental hazards, and dynamic difficulty scaling.
 
-### Core Gameplay
-- ✅ Player movement (keyboard arrows, touch drag)
-- ✅ Shooting mechanics (spacebar or tap)
-- ✅ Enemy waves with different types (normal, fast, strong)
-- ✅ Enemy movement patterns
-- ✅ Collision detection
-- ✅ Lives system (3 lives)
-- ✅ Scoring system
+---
 
-### Advanced Features
-- ✅ **Level progression** - Enemies increase with each level
-- ✅ **Enemy bullets** - Enemies can shoot back
-- ✅ **Particle effects** - Explosions when enemies are destroyed
-- ✅ **Invulnerability** - Temporary shield and animated aura after taking damage
-- ✅ **Pause functionality** - Press P or ESC to pause
-- ✅ **High score tracking & local leaderboard** - Saves best scores locally
-- ✅ **Game over screen** - Shows stats, achievements update and allows restart
-- ✅ **Start menu** - Beautiful menu screen with controls and mode selection
-- ✅ **Visual effects** - Starfield background, particle explosions, animated enemies
-- ✅ **Multiple enemy types** - Normal, fast, strong and kamikaze divers
-- ✅ **Boss levels** - Strong bosses every few levels with second attack phase
-- ✅ **Power-ups** - Multi-shot, shield, speed boost, extra life
-- ✅ **Achievements** - Local achievements based on StatisticsService
-- ✅ **Game modes** - Classic, Survival, Hardcore
+## ✨ Key Features
 
-## Controls
+### 🎯 Core Gameplay
+- **Classic Space Invaders mechanics** with modern enhancements
+- **5 Game Modes**: Classic, Survival, Hardcore, Galactic Run, Boss Rush
+- **Advanced Enemy AI** with unique behaviors and attack patterns
+- **Smooth 60 FPS gameplay** with responsive controls
+- **Progressive difficulty** that adapts to player skill
+
+### 🔫 Advanced Weapon System
+- **6 Unique Weapon Types**:
+  - **Basic Cannon** - Standard reliable weapon
+  - **Spread Shot** - Multi-directional firing
+  - **Laser Beam** - Piercing high-damage shots
+  - **Plasma Cannon** - Dual projectile system
+  - **Rocket Launcher** - High explosive damage
+  - **Wave Gun** - Wave pattern projectiles
+- **Energy Management System** with regeneration
+- **Weapon Switching** (Q/E keys)
+- **Visual Weapon Trails** and unique effects per weapon
+
+### ⚡ Special Abilities
+- **4 Powerful Abilities**:
+  - **Time Slow** - Slows enemies and projectiles
+  - **Screen Clear** - Destroys all enemies instantly
+  - **Mega Shield** - Temporary invulnerability
+  - **Rapid Fire** - Doubles fire rate temporarily
+- **Cooldown System** with visual indicators
+- **Strategic Usage** for different combat situations
+
+### 👾 Advanced Enemy Types
+- **8 Unique Enemy Types**:
+  - **Sniper** - Precise aimed shots
+  - **Tank** - Heavy armor, slow movement
+  - **Healer** - Repairs nearby enemies
+  - **Spawner** - Creates smaller enemies
+  - **Phantom** - Temporary invulnerability phases
+  - **Morphing** - Size-changing behavior
+  - **Shielded** - Regenerating protective shields
+  - **Teleporter** - Instant position changes
+- **Advanced AI** with ability usage and group tactics
+
+### 🌌 Environmental Hazards
+- **6 Dynamic Hazards**:
+  - **Asteroids** - Destructible obstacles
+  - **Space Debris** - Fast-moving small obstacles
+  - **Black Holes** - Gravitational pull effects
+  - **Solar Flares** - Expanding damage zones
+  - **Comets** - High-speed projectiles
+  - **Nebula** - Projectile interference fields
+- **Strategic Elements** affecting gameplay and tactics
+
+### 💎 Enhanced Power-Up System
+- **10 Power-Up Types** with weighted spawning:
+  - **Multi-Shot** - Fire multiple bullets
+  - **Shield** - Temporary protection
+  - **Speed Boost** - Increased movement
+  - **Life Up** - Extra lives
+  - **Weapon Upgrade** - Enhance current weapon
+  - **Energy Boost** - Restore weapon energy
+  - **Time Bomb** - Delayed screen clear
+  - **Magnet** - Attract nearby power-ups
+  - **Drone** - Auto-firing assistant
+  - **Freeze** - Stop enemy movement
+
+### 🎨 Visual Effects & Polish
+- **Screen Shake** for impacts and explosions
+- **Particle Systems** for explosions and effects
+- **Time Slow Visual Distortion**
+- **Weapon-Specific Bullet Trails**
+- **Advanced Enemy Visual Indicators** (health bars, shields, phases)
+- **Smooth Animations** at 60 FPS
+
+### 🏆 Progression & Achievement System
+- **Dynamic Difficulty Scaling** based on performance
+- **Combo System** for consecutive hits
+- **Comprehensive Statistics Tracking**
+- **Achievement System** with 50+ achievements
+- **Local & Online Leaderboards**
+- **Campaign Mode** with structured missions
+
+---
+
+## 🎮 Controls
 
 ### Keyboard
-- **← →** Arrow keys: Move player
-- **SPACE**: Shoot
-- **P / ESC**: Pause/Resume
+- **← →** - Move player left/right
+- **Space** - Fire current weapon
+- **Q/E** - Switch weapons
+- **1-4** - Activate special abilities
+- **P/ESC** - Pause game
 
 ### Touch/Mouse
-- **Tap**: Shoot
-- **Drag**: Move player horizontally
+- **Drag** - Move player horizontally
+- **Tap/Click** - Fire weapon
 
-## Game Mechanics
+---
 
-- **Lives**: Start with 3 lives. Lose a life when hit by enemy or enemy bullet
-- **Invulnerability**: 2 seconds of invulnerability after taking damage (blue glow)
-- **Enemy Types**:
-  - Normal (Yellow): 10 points
-  - Fast (Red): 20 points  
-  - Strong (Purple): 15 points
-- **Level Progression**: Each level adds more enemies and increases difficulty
-- **Enemy Shooting**: Enemies periodically shoot bullets at the player
+## 🚀 Installation & Setup
 
-## Project Structure (simplified)
-
-```
-lib/
-├── main.dart                        # App entry point
-├── game_state.dart                  # Game state management
-├── collision_detection.dart         # Collision logic
-├── enemy_movement.dart              # Enemy movement controller
-├── models/
-│   ├── power_up.dart                # Power-up model
-│   └── game_mode.dart               # Game mode enum
-├── services/
-│   ├── audio_service.dart           # Audio system
-│   ├── statistics_service.dart      # Statistics tracking
-│   ├── achievements_service.dart    # Achievements system
-│   ├── leaderboard_service.dart     # Local (and optional online) leaderboard
-│   ├── online_leaderboard_client.dart # Online leaderboard abstraction
-│   └── localization_service.dart    # Simple RU/EN localization
-├── screens/
-│   ├── start_menu_screen.dart       # Start menu with modes & navigation
-│   ├── game_screen.dart             # Main game screen
-│   ├── game_over_screen.dart        # Game over summary
-│   ├── statistics_screen.dart       # Statistics UI
-│   ├── achievements_screen.dart     # Achievements UI
-│   ├── leaderboard_screen.dart      # Local leaderboard UI
-│   └── settings_screen.dart         # Audio & language settings
-└── widgets/
-    ├── player.dart
-    ├── enemy.dart
-    ├── bullet.dart
-    ├── power_up.dart
-    └── barrier.dart
-```
-
-## Assets
-
-The game uses fallback colored widgets if image assets are not found. To add custom sprites:
-
-1. Create images in `assets/images/`:
-   - `player.png` (50x50 recommended)
-   - `enemy.png` (40x40 recommended)
-   - `bullet.png` (5x15 recommended)
-
-2. The game will automatically use them if present, otherwise uses colorful widget fallbacks.
-
-## 🎨 Random Icon Generator
-
-The project includes a random icon generator that creates unique app icons for all platforms!
+### Requirements
+- **Flutter SDK** 3.0+
+- **Dart SDK** 2.17+
+- **Modern Browser** for web version
+- **Windows 10+** for desktop version
 
 ### Quick Start
 
 ```bash
-# Generate random icons for all platforms
-python tools/generate_icons.py
+# Clone the repository
+git clone https://github.com/your-username/space-invaders-enhanced.git
+cd space-invaders-enhanced
 
-# Or use the quick helper (with optional rebuild)
-python tools/quick_icons.py --rebuild
-
-# For Windows, just run the batch file
-tools\generate_icons.bat
-
-# For Mac/Linux
-bash tools/generate_icons.sh
-```
-
-### What it Does
-
-- ✅ Generates 47 unique icons for all platforms
-- ✅ Supports Android, iOS, Web, Windows, macOS, Linux
-- ✅ Uses random color palettes (Neon, Space, Cyberpunk, etc.)
-- ✅ Creates geometric shapes (circles, squares, triangles, stars)
-- ✅ Adds glow border effects
-- ✅ Each run creates a completely different design!
-
-### Platforms & Sizes
-
-| Platform | Icons | Sizes |
-|----------|-------|-------|
-| Android | 6 | ldpi, mdpi, hdpi, xhdpi, xxhdpi, xxxhdpi |
-| iOS | 15 | 20, 29, 40, 60, 76, 83.5, 1024 (various scales) |
-| Web | 4 | 192, 512 (normal + maskable) |
-| Windows | 1 | 256x256 (ICO format) |
-| macOS | 7 | 16, 32, 64, 128, 256, 512, 1024 |
-| Linux | 1 | 256x256 |
-
-### Files
-
-- `tools/generate_icons.py` - Main Python generator
-- `tools/quick_icons.py` - Quick helper with rebuild options
-- `tools/generate_icons.bat` - Windows batch runner
-- `tools/generate_icons.sh` - Mac/Linux shell runner
-- `tools/ICON_GENERATOR_README.md` - Detailed documentation
-
-### Rebuild After Icon Changes
-
-```bash
-flutter clean
+# Install dependencies
 flutter pub get
-flutter run
+
+# Run in browser
+flutter run -d chrome --web-port=8080
+
+# Run on desktop
+flutter run -d windows
+
+# Run on mobile
+flutter run -d android
 ```
 
-## Getting Started
+---
 
-1. Install Flutter dependencies:
-   ```bash
-   flutter pub get
-   ```
+## 📱 Platform Support
 
-2. Run the game:
-   ```bash
-   flutter run
-   ```
+| Platform | Status | Notes |
+|-----------|--------|---------|
+| **Web** | ✅ Full Support | Chrome, Edge, Firefox, Safari |
+| **Windows** | ✅ Full Support | Native performance |
+| **Android** | ✅ Full Support | Touch controls optimized |
+| **iOS** | ✅ Full Support | iPhone/iPad optimized |
+| **Linux** | ✅ Planned | Future release |
+| **macOS** | ✅ Planned | Future release |
 
-3. Build for web:
-   ```bash
-   flutter build web
-   ```
+---
 
-4. Build for mobile:
-   ```bash
-   flutter build apk  # Android
-   flutter build ios  # iOS
-   ```
+## 🏗️ Project Structure
 
-## Dependencies
+```
+lib/
+├── models/           # Game entities and data models
+│   ├── weapon.dart              # Advanced weapon system
+│   ├── advanced_enemy.dart      # Enemy types and AI
+│   ├── environmental_hazard.dart # Environmental hazards
+│   ├── power_up.dart           # Enhanced power-ups
+│   └── ...
+├── screens/          # Game screens and UI
+│   ├── game_screen.dart       # Main game interface
+│   ├── start_menu_screen.dart # Main menu
+│   └── ...
+├── widgets/          # Reusable UI components
+│   ├── weapon.dart             # Weapon UI widgets
+│   ├── advanced_enemy.dart     # Enemy visual components
+│   └── ...
+├── services/         # External services
+│   ├── audio_service.dart     # Audio management
+│   ├── leaderboard_service.dart # Score tracking
+│   └── ...
+├── docs/            # Documentation
+│   ├── API.md               # Complete API reference
+│   ├── ARCHITECTURE.md      # Architecture overview
+│   └── ADVANCED_FEATURES.md # Feature details
+└── game_state.dart  # Central state management
+```
 
-- `shared_preferences: ^2.2.2` - For saving high scores, stats and settings
-- `audioplayers: ^5.2.1` - For sound effects and background music
-- `http: ^1.2.0` - For optional online leaderboard REST client
+---
 
-## Features Beyond Core Plan
-
-### 🎵 Audio System
-- Background music support
-- Sound effects for shooting and explosions
-- Adjustable volume controls (separate for music and effects)
-- Settings to enable/disable audio
-
-### 📊 Statistics Tracking
-- Games played counter
-- Total score across all games
-- Highest level reached
-- Total enemies killed
-- Win/loss tracking
-- Win rate percentage
-- Beautiful statistics screen with visual cards
-
-### ⚙️ Settings Screen
-- Audio controls (sound effects and music toggle)
-- Volume sliders for fine-tuning
-- Settings persistence across sessions
-
-### 🎁 Power-ups System
-- Multi-shot power-up
-- Shield power-up
-- Speed boost power-up
-- Life-up power-up
-
-## Web Version
-
-The project also includes a separate web version implementation in the `web/` directory with enhanced features like:
-- Canvas-based rendering
-- Advanced particle effects
-- Power-ups system
-- Enhanced UI
-
-## Online Leaderboard (API Hooks)
-
-The app includes a pluggable online leaderboard client.
-
-- Local leaderboard always works offline via `SharedPreferences`.
-- Online sync is **disabled by default**.
-- To enable it, provide a backend and configure:
+## 🧪 Testing
 
 ```bash
-flutter run \
-  --dart-define=LEADERBOARD_API_BASE_URL=https://your.api \
-  --dart-define=LEADERBOARD_API_KEY=optional_key
+# Run all tests
+flutter test
+
+# Run unit tests only
+flutter test test/unit/
+
+# Run widget tests only
+flutter test test/widget/
+
+# Generate coverage report
+flutter test --coverage
 ```
 
-The backend is expected to expose:
+---
 
-- `GET  /leaderboard` – returns a JSON array or `{ "entries": [...] }`
-- `POST /leaderboard` – accepts a single leaderboard entry JSON
+## 📚 Documentation
 
-Entry JSON format matches `LeaderboardEntry.toJson()`:
+- **[API Documentation](docs/API.md)** - Complete technical reference
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design
+- **[Advanced Features](docs/ADVANCED_FEATURES.md)** - Feature details
+- **[Contributing Guide](CONTRIBUTING.md)** - Development guidelines
+- **[Changelog](CHANGELOG.md)** - Version history and changes
 
-```json
-{
-  "score": 1234,
-  "level": 7,
-  "mode": "GameMode.classic",
-  "date": "2025-01-01T12:00:00.000Z"
-}
-```
+---
 
-You are free to implement this backend using any technology (Firebase, REST, etc.).
+## 🎯 Development Roadmap
 
-## Additional Documentation
+### Version 2.1 (Q1 2024)
+- [ ] Enhanced audio system with background music
+- [ ] Additional visual effects and polish
+- [ ] Mobile performance optimizations
+- [ ] Bug fixes and stability improvements
 
-- `docs/ARCHITECTURE.md` – detailed overview of the current game architecture and how systems (campaign, meta‑progression, AI hooks) fit together.
-- `docs/PLATFORM_SUPPORT.md` – platform matrix for Android/iOS/Web/Windows/macOS/Linux and notes on experimental targets (UWP, Aurora‑like systems).
-- `docs/AI_QUANTUM_ENGINE.md` – forward‑looking design for integrating external AI agents, services, and optional web3/blockchain bridges with the game.
-- `docs/GIT_SYSTEMS.md` – notes on using this repository across multiple git forges (GitHub/GitLab/etc. and domestic platforms via `git_systems/`).
+### Version 2.2 (Q2 2024)
+- [ ] Multiplayer support (co-op mode)
+- [ ] Custom themes and ship skins
+- [ ] Additional achievements and challenges
+- [ ] Advanced analytics and statistics
 
-## License
+### Version 3.0 (H2 2024)
+- [ ] Boss battles with unique mechanics
+- [ ] Procedurally generated levels
+- [ ] AI Director for dynamic content
+- [ ] Full soundtrack and audio system
 
-This project is open source and available for educational purposes.
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### Quick Contribution Steps
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- **Flutter Team** - For the amazing framework
+- **Original Space Invaders** - For the classic inspiration
+- **Community** - For feedback and suggestions
+- **Open Source Contributors** - For valuable contributions
+
+---
+
+## 📊 Game Statistics
+
+- **50+** Major enhancements and features
+- **6** Advanced weapon types
+- **8** Unique enemy types
+- **10** Enhanced power-up types
+- **6** Environmental hazard types
+- **4** Special abilities
+- **5** Different game modes
+- **60 FPS** Target performance
+- **4** Platform support (Web, Windows, Android, iOS)
+
+---
+
+**🎮 Ready to play? Launch the game and experience the enhanced Space Invaders!**
+
+**🔧 Ready to develop? Check the documentation and start contributing!**
+
+**📚 Need help? Explore the comprehensive documentation and API reference!**

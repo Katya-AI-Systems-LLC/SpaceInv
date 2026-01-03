@@ -1,0 +1,472 @@
+# GitLab CI/CD Templates for Space Invaders Enhanced Edition
+
+# Security Audit and Compliance Pipeline
+security-audit-compliance:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install bandit safety semgrep
+    - pip install pytest pytest-asyncio
+    - pip install httpx fastapi uvicorn
+    - pip install -r requirements.txt
+    - npm install -g audit-ci snyk
+    - flutter pub get
+  script:
+    - echo "🔒 Starting security audit and compliance pipeline..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Run code security analysis
+    - echo "🔍 Running code security analysis..."
+    - bandit -r . -f json -o bandit-report.json
+    - bandit -r . -f html -o bandit-report.html
+    - safety check --json --output safety-report.json
+    - safety check --html --output safety-report.html
+    - semgrep --config=auto --json --output=semgrep-report.json .
+    - semgrep --config=auto --html --output=semgrep-report.html .
+    - snyk test --json --output-file=snyk-report.json || true
+    - npm audit --json > npm-audit-report.json || true
+    - flutter analyze --format=json > flutter-analysis.json || true
+    
+    # Start API server for security testing
+    - echo "🚀 Starting API server for security testing..."
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run API security tests
+    - echo "🔌 Running API security tests..."
+    - pytest tests/security/api/ --junitxml=api-security-results.xml --tb=short
+    - pytest tests/security/auth/ --junitxml=auth-security-results.xml --tb=short
+    - pytest tests/security/authz/ --junitxml=authz-security-results.xml --tb=short
+    - pytest tests/security/input-validation/ --junitxml=input-validation-results.xml --tb=short
+    
+    # Run OWASP ZAP security scan
+    - echo "🛡️ Running OWASP ZAP security scan..."
+    - docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8000 -J zap-report.json -I zap-report.html || true
+    
+    # Run penetration tests
+    - echo "💥 Running penetration tests..."
+    - pytest tests/penetration/sql-injection/ --junitxml=sql-injection-results.xml --tb=short
+    - pytest tests/penetration/xss/ --junitxml=xss-results.xml --tb=short
+    - pytest tests/penetration/csrf/ --junitxml=csrf-results.xml --tb=short
+    - pytest tests/penetration/auth-bypass/ --junitxml=auth-bypass-results.xml --tb=short
+    - pytest tests/penetration/privilege-escalation/ --junitxml=privilege-escalation-results.xml --tb=short
+    - pytest tests/penetration/data-exposure/ --junitxml=data-exposure-results.xml --tb=short
+    
+    # Run compliance checks
+    - echo "🏛️ Running compliance checks..."
+    - python scripts/check_gdpr_compliance.py --output gdpr-compliance-report.json
+    - python scripts/check_russian_compliance.py --output russian-compliance-report.json
+    - python scripts/check_pci_dss_compliance.py --output pci-dss-compliance-report.json
+    - python scripts/check_iso27001_compliance.py --output iso27001-compliance-report.json
+    - python scripts/check_data_residency.py --output data-residency-report.json
+    - python scripts/check_privacy_policy.py --output privacy-policy-report.json
+    
+    # Run Russian cloud security audit
+    - echo "☁️ Running Russian cloud security audit..."
+    - python scripts/audit_yandex_cloud_security.py --output yandex-cloud-security-report.json
+    - python scripts/audit_vk_cloud_security.py --output vk-cloud-security-report.json
+    - python scripts/audit_selectel_security.py --output selectel-security-report.json
+    - python scripts/check_russian_data_residency.py --output russian-data-residency-report.json
+    
+    # Generate comprehensive security report
+    - echo "📊 Generating comprehensive security report..."
+    - python scripts/generate_comprehensive_security_report.py \
+      --bandit bandit-report.json \
+      --safety safety-report.json \
+      --semgrep semgrep-report.json \
+      --snyk snyk-report.json \
+      --npm npm-audit-report.json \
+      --flutter flutter-analysis.json \
+      --zap zap-report.json \
+      --api-tests api-security-results.xml \
+      --auth-tests auth-security-results.xml \
+      --authz-tests authz-security-results.xml \
+      --input-tests input-validation-results.xml \
+      --sql-injection sql-injection-results.xml \
+      --xss xss-results.xml \
+      --csrf csrf-results.xml \
+      --auth-bypass auth-bypass-results.xml \
+      --privilege-escalation privilege-escalation-results.xml \
+      --data-exposure data-exposure-results.xml \
+      --gdpr gdpr-compliance-report.json \
+      --russian russian-compliance-report.json \
+      --pci-dss pci-dss-compliance-report.json \
+      --iso27001 iso27001-compliance-report.json \
+      --data-residency data-residency-report.json \
+      --privacy privacy-policy-report.json \
+      --yandex yandex-cloud-security-report.json \
+      --vk vk-cloud-security-report.json \
+      --selectel selectel-security-report.json \
+      --russian-data-residency russian-data-residency-report.json \
+      --output comprehensive-security-report.json
+  artifacts:
+    reports:
+      junit: comprehensive-security-report.json
+    paths:
+      - bandit-report.json
+      - bandit-report.html
+      - safety-report.json
+      - safety-report.html
+      - semgrep-report.json
+      - semgrep-report.html
+      - snyk-report.json
+      - npm-audit-report.json
+      - flutter-analysis.json
+      - zap-report.json
+      - zap-report.html
+      - api-security-results.xml
+      - auth-security-results.xml
+      - authz-security-results.xml
+      - input-validation-results.xml
+      - sql-injection-results.xml
+      - xss-results.xml
+      - csrf-results.xml
+      - auth-bypass-results.xml
+      - privilege-escalation-results.xml
+      - data-exposure-results.xml
+      - gdpr-compliance-report.json
+      - russian-compliance-report.json
+      - pci-dss-compliance-report.json
+      - iso27001-compliance-report.json
+      - data-residency-report.json
+      - privacy-policy-report.json
+      - yandex-cloud-security-report.json
+      - vk-cloud-security-report.json
+      - selectel-security-report.json
+      - russian-data-residency-report.json
+      - comprehensive-security-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Performance Optimization Pipeline
+performance-optimization:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install py-spy memory-profiler
+    - pip install psycopg2-binary sqlalchemy
+    - pip install pytest pytest-asyncio
+    - pip install httpx fastapi uvicorn
+    - pip install locust
+    - pip install -r requirements.txt
+    - npm install -g lighthouse-cli webpack-bundle-analyzer
+    - flutter pub get
+  script:
+    - echo "⚡ Starting performance optimization pipeline..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Run performance profiling
+    - echo "🔍 Running performance profiling..."
+    - python -m py-spy top --output python-profile.svg --duration 30 python scripts/sample_backend.py &
+    - sleep 35
+    - python -m memory_profiler scripts/memory_intensive_task.py > memory-profile.txt
+    - node --prof scripts/sample_frontend.js
+    - node --prof-process isolate-*.v8.log > node-profile.txt
+    - flutter test --profile --reporter=json > flutter-profile.json
+    
+    # Analyze performance bottlenecks
+    - python scripts/analyze_performance_bottlenecks.py \
+      --python-profile python-profile.svg \
+      --memory-profile memory-profile.txt \
+      --node-profile node-profile.txt \
+      --flutter-profile flutter-profile.json \
+      --output performance-analysis.json
+    
+    # Start API server for performance testing
+    - echo "🚀 Starting API server for performance testing..."
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run database performance analysis
+    - echo "🗄️ Running database performance analysis..."
+    - python scripts/analyze_slow_queries.py --database-url $DATABASE_URL --output slow-queries-analysis.json
+    - python scripts/analyze_database_performance.py --database-url $DATABASE_URL --output database-performance-analysis.json
+    - python scripts/analyze_redis_performance.py --redis-url $REDIS_URL --output redis-performance-analysis.json
+    
+    # Generate query optimizations
+    - python scripts/generate_query_optimizations.py --database-url $DATABASE_URL --output query-optimizations.json
+    - python scripts/create_optimized_indexes.py --database-url $DATABASE_URL --output index-optimizations.json
+    
+    # Run API performance analysis
+    - echo "🔌 Running API performance analysis..."
+    - python scripts/analyze_api_performance.py --base-url http://localhost:8000 --output api-performance-analysis.json
+    - python scripts/analyze_endpoint_performance.py --base-url http://localhost:8000 --output endpoint-performance-analysis.json
+    
+    # Run API load testing
+    - echo "🏋️ Running API load testing..."
+    - locust -f tests/performance/api/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host http://localhost:8000 --html api-load-test-report.html --csv api-load-test-results.csv
+    
+    # Generate API optimizations
+    - python scripts/generate_api_optimizations.py \
+      --performance-analysis api-performance-analysis.json \
+      --endpoint-analysis endpoint-performance-analysis.json \
+      --load-test-results api-load-test-results.csv \
+      --output api-optimizations.json
+    
+    # Build web application for frontend performance testing
+    - echo "🌐 Building web application for frontend performance testing..."
+    - flutter build web --profile --web-renderer canvaskit
+    
+    # Run Lighthouse performance audit
+    - echo "🔍 Running Lighthouse performance audit..."
+    - cd build/web && python -m http.server 8080 &
+    - sleep 5
+    - lighthouse http://localhost:8080 --output=json --output-path=lighthouse-report.json --chrome-flags="--headless"
+    - lighthouse http://localhost:8000 --output=html --output-path=lighthouse-report.html --chrome-flags="--headless"
+    
+    # Analyze bundle size
+    - webpack-bundle-analyzer build/web/main.dart.js --mode=json --output=bundle-analysis.json
+    
+    # Generate frontend optimizations
+    - python scripts/generate_frontend_optimizations.py \
+      --lighthouse-report lighthouse-report.json \
+      --bundle-analysis bundle-analysis.json \
+      --output frontend-optimizations.json
+    
+    # Apply frontend optimizations
+    - python scripts/apply_frontend_optimizations.py --optimizations frontend-optimizations.json --build-dir build/web
+    
+    # Rebuild with optimizations
+    - flutter build web --release --web-renderer canvaskit
+    
+    # Test optimized performance
+    - cd build/web && python -m http.server 8080 &
+    - sleep 5
+    - lighthouse http://localhost:8080 --output=json --output-path=optimized-lighthouse-report.json --chrome-flags="--headless"
+    
+    # Build mobile applications for mobile performance testing
+    - echo "📱 Building mobile applications for performance testing..."
+    - flutter build apk --profile
+    - flutter build ios --profile
+    
+    # Run mobile performance tests
+    - echo "📱 Running mobile performance tests..."
+    - flutter test --profile integration_test/app_test.dart --driver integration_test/driver.dart --output=mobile-performance-results.json
+    
+    # Analyze mobile performance
+    - python scripts/analyze_mobile_performance.py --flutter-results mobile-performance-results.json --output mobile-performance-analysis.json
+    
+    # Generate mobile optimizations
+    - python scripts/generate_mobile_optimizations.py --performance-analysis mobile-performance-analysis.json --output mobile-optimizations.json
+    
+    # Apply mobile optimizations
+    - python scripts/apply_mobile_optimizations.py --optimizations mobile-optimizations.json
+    
+    # Rebuild mobile with optimizations
+    - flutter build apk --release
+    - flutter build ios --release
+    
+    # Test optimized mobile performance
+    - flutter test --profile integration_test/app_test.dart --driver integration_test/driver.dart --output=optimized-mobile-performance-results.json
+    
+    # Generate comprehensive performance report
+    - echo "📊 Generating comprehensive performance report..."
+    - python scripts/generate_comprehensive_performance_report.py \
+      --performance-analysis performance-analysis.json \
+      --slow-queries slow-queries-analysis.json \
+      --database-performance database-performance-analysis.json \
+      --redis-performance redis-performance-analysis.json \
+      --query-optimizations query-optimizations.json \
+      --index-optimizations index-optimizations.json \
+      --api-performance api-performance-analysis.json \
+      --endpoint-performance endpoint-performance-analysis.json \
+      --api-load-test-results api-load-test-results.csv \
+      --api-optimizations api-optimizations.json \
+      --lighthouse lighthouse-report.json \
+      --optimized-lighthouse optimized-lighthouse-report.json \
+      --bundle-analysis bundle-analysis.json \
+      --frontend-optimizations frontend-optimizations.json \
+      --mobile-performance mobile-performance-results.json \
+      --optimized-mobile-performance optimized-mobile-performance-results.json \
+      --mobile-optimizations mobile-optimizations.json \
+      --output comprehensive-performance-report.json
+  artifacts:
+    reports:
+      junit: comprehensive-performance-report.json
+    paths:
+      - python-profile.svg
+      - memory-profile.txt
+      - node-profile.txt
+      - flutter-profile.json
+      - performance-analysis.json
+      - slow-queries-analysis.json
+      - database-performance-analysis.json
+      - redis-performance-analysis.json
+      - query-optimizations.json
+      - index-optimizations.json
+      - api-performance-analysis.json
+      - endpoint-performance-analysis.json
+      - api-load-test-report.html
+      - api-load-test-results.csv
+      - api-optimizations.json
+      - lighthouse-report.json
+      - lighthouse-report.html
+      - optimized-lighthouse-report.json
+      - bundle-analysis.json
+      - frontend-optimizations.json
+      - mobile-performance-results.json
+      - mobile-performance-analysis.json
+      - mobile-optimizations.json
+      - optimized-mobile-performance-results.json
+      - comprehensive-performance-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Russian Cloud Security and Performance Audit
+russian-cloud-audit:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - echo "☁️ Starting Russian Cloud Security and Performance Audit..."
+    
+    # Audit Yandex Cloud security
+    - echo "🇷🇺 Auditing Yandex Cloud security..."
+    - python scripts/audit_yandex_cloud_security.py --output yandex-cloud-security-report.json
+    - python scripts/audit_yandex_cloud_performance.py --output yandex-cloud-performance-report.json
+    
+    # Audit VK Cloud security
+    - echo "☁️ Auditing VK Cloud security..."
+    - python scripts/audit_vk_cloud_security.py --output vk-cloud-security-report.json
+    - python scripts/audit_vk_cloud_performance.py --output vk-cloud-performance-report.json
+    
+    # Audit Selectel security
+    - echo "☁️ Auditing Selectel security..."
+    - python scripts/audit_selectel_security.py --output selectel-security-report.json
+    - python scripts/audit_selectel_performance.py --output selectel-performance-report.json
+    
+    # Check Russian data residency compliance
+    - echo "🏛️ Checking Russian data residency compliance..."
+    - python scripts/check_russian_data_residency.py --output russian-data-residency-report.json
+    - python scripts/check_russian_performance_standards.py --output russian-performance-standards-report.json
+    
+    # Generate Russian cloud audit report
+    - echo "📊 Generating Russian cloud audit report..."
+    - python scripts/generate_russian_cloud_audit_report.py \
+      --yandex-security yandex-cloud-security-report.json \
+      --yandex-performance yandex-cloud-performance-report.json \
+      --vk-security vk-cloud-security-report.json \
+      --vk-performance vk-cloud-performance-report.json \
+      --selectel-security selectel-security-report.json \
+      --selectel-performance selectel-performance-report.json \
+      --data-residency russian-data-residency-report.json \
+      --performance-standards russian-performance-standards-report.json \
+      --output russian-cloud-audit-report.json
+  artifacts:
+    reports:
+      junit: russian-cloud-audit-report.json
+    paths:
+      - yandex-cloud-security-report.json
+      - yandex-cloud-performance-report.json
+      - vk-cloud-security-report.json
+      - vk-cloud-performance-report.json
+      - selectel-security-report.json
+      - selectel-performance-report.json
+      - russian-data-residency-report.json
+      - russian-performance-standards-report.json
+      - russian-cloud-audit-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Risk Assessment Pipeline
+risk-assessment:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - echo "🎯 Starting risk assessment pipeline..."
+    
+    # Run security risk assessment
+    - echo "🔒 Running security risk assessment..."
+    - python scripts/assess_security_risk.py --output security-risk-assessment.json
+    
+    # Run operational risk assessment
+    - echo "⚙️ Running operational risk assessment..."
+    - python scripts/assess_operational_risk.py --output operational-risk-assessment.json
+    
+    # Run financial risk assessment
+    - echo "💰 Running financial risk assessment..."
+    - python scripts/assess_financial_risk.py --output financial-risk-assessment.json
+    
+    # Run compliance risk assessment
+    - echo "🏛️ Running compliance risk assessment..."
+    - python scripts/assess_compliance_risk.py --output compliance-risk-assessment.json
+    
+    # Run performance risk assessment
+    - echo "⚡ Running performance risk assessment..."
+    - python scripts/assess_performance_risk.py --output performance-risk-assessment.json
+    
+    # Generate comprehensive risk assessment report
+    - echo "📊 Generating comprehensive risk assessment report..."
+    - python scripts/generate_risk_assessment_report.py \
+      --security security-risk-assessment.json \
+      --operational operational-risk-assessment.json \
+      --financial financial-risk-assessment.json \
+      --compliance compliance-risk-assessment.json \
+      --performance performance-risk-assessment.json \
+      --output comprehensive-risk-assessment.json
+  artifacts:
+    reports:
+      junit: comprehensive-risk-assessment.json
+    paths:
+      - security-risk-assessment.json
+      - operational-risk-assessment.json
+      - financial-risk-assessment.json
+      - compliance-risk-assessment.json
+      - performance-risk-assessment.json
+      - comprehensive-risk-assessment.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"

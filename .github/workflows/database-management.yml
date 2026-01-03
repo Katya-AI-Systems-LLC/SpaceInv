@@ -1,0 +1,481 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Database Management
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'database/**'
+      - 'migrations/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'database/**'
+      - 'migrations/**'
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Database operation to perform'
+        required: true
+        type: choice
+        options:
+          - 'migrate'
+          - 'backup'
+          - 'restore'
+          - 'optimize'
+          - 'analyze'
+          - 'cleanup'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'development'
+          - 'staging'
+          - 'production'
+
+jobs:
+  database-migration:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'migrate' || github.event_name == 'push'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: space_invaders_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary alembic sqlalchemy
+          pip install -r requirements.txt
+
+      - name: Wait for database
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for database..."
+            sleep 2
+          done
+
+      - name: Run database migrations
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          alembic upgrade head
+
+      - name: Verify migration
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          alembic current
+          alembic history
+
+      - name: Run migration tests
+        run: |
+          export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/space_invaders_test"
+          python tests/test_migrations.py
+
+      - name: Upload migration results
+        uses: actions/upload-artifact@v3
+        with:
+          name: migration-results
+          path: migration-report.json
+
+  database-backup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'backup' || github.event_name == 'schedule'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create backup
+        run: |
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_FILE="space_invaders_backup_${TIMESTAMP}.sql"
+          
+          # Create backup
+          pg_dump $DATABASE_URL > $BACKUP_FILE
+          
+          # Compress backup
+          gzip $BACKUP_FILE
+          
+          echo "BACKUP_FILE=${BACKUP_FILE}.gz" >> $GITHUB_ENV
+
+      - name: Upload to cloud storage
+        run: |
+          # Upload to Yandex Cloud
+          if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+            curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+            export PATH=$PATH:$HOME/yandex-cloud/bin
+            
+            yc config profile create sa-profile
+            yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+            yc config set folder-id "$YC_FOLDER_ID"
+            
+            yc storage s3 cp \
+              --endpoint-url=https://storage.yandexcloud.net \
+              $BACKUP_FILE \
+              s3://space-invaders-backups/
+          fi
+          
+          # Upload to VK Cloud
+          if [ -n "$VK_CLOUD_TOKEN" ]; then
+            curl -X POST "$VK_CLOUD_STORAGE_URL" \
+              -H "Authorization: Bearer $VK_CLOUD_TOKEN" \
+              -F "file=@$BACKUP_FILE"
+          fi
+
+      - name: Cleanup old backups
+        run: |
+          # Keep only last 30 days of backups
+          find . -name "space_invaders_backup_*.sql.gz" -mtime +30 -delete
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: database-backup
+          path: ${{ env.BACKUP_FILE }}
+
+  database-restore:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'restore'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Download backup
+        run: |
+          # Download from Yandex Cloud
+          if [ -n "$YC_SERVICE_ACCOUNT_KEY" ]; then
+            curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+            export PATH=$PATH:$HOME/yandex-cloud/bin
+            
+            yc config profile create sa-profile
+            yc config set service-account-key "$YC_SERVICE_ACCOUNT_KEY"
+            yc config set folder-id "$YC_FOLDER_ID"
+            
+            yc storage s3 cp \
+              --endpoint-url=https://storage.yandexcloud.net \
+              s3://space-invaders-backups/space_invaders_backup_latest.sql.gz \
+              ./latest_backup.sql.gz
+          fi
+          
+          # Extract backup
+          gunzip latest_backup.sql.gz
+
+      - name: Restore database
+        run: |
+          # Restore from backup
+          psql $DATABASE_URL < latest_backup.sql
+
+      - name: Verify restore
+        run: |
+          # Verify database integrity
+          python scripts/verify_database.py
+
+      - name: Run post-restore tests
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python tests/test_database_integrity.py
+
+  database-optimization:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'optimize' || github.event_name == 'schedule'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary sqlalchemy
+          pip install -r requirements.txt
+
+      - name: Analyze database performance
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/analyze_database_performance.py
+
+      - name: Optimize database
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/optimize_database.py
+
+      - name: Rebuild indexes
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/rebuild_indexes.py
+
+      - name: Update statistics
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/update_statistics.py
+
+      - name: Verify optimization
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/verify_optimization.py
+
+      - name: Upload optimization report
+        uses: actions/upload-artifact@v3
+        with:
+          name: optimization-report
+          path: optimization-report.json
+
+  database-analysis:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'analyze' || github.event_name == 'schedule'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary sqlalchemy pandas matplotlib
+          pip install -r requirements.txt
+
+      - name: Analyze database usage
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/analyze_database_usage.py
+
+      - name: Generate performance report
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/generate_performance_report.py
+
+      - name: Analyze slow queries
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/analyze_slow_queries.py
+
+      - name: Check database health
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/check_database_health.py
+
+      - name: Upload analysis reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: database-analysis
+          path: |
+            database-usage-report.json
+            performance-report.json
+            slow-queries-report.json
+            database-health-report.json
+
+  database-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.operation == 'cleanup' || github.event_name == 'schedule'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary sqlalchemy
+          pip install -r requirements.txt
+
+      - name: Cleanup old data
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/cleanup_old_data.py
+
+      - name: Cleanup orphaned records
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/cleanup_orphaned_records.py
+
+      - name: Vacuum database
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/vacuum_database.py
+
+      - name: Cleanup temporary tables
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/cleanup_temp_tables.py
+
+      - name: Verify cleanup
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/verify_cleanup.py
+
+      - name: Upload cleanup report
+        uses: actions/upload-artifact@v3
+        with:
+          name: cleanup-report
+          path: cleanup-report.json
+
+  database-security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install psycopg2-binary sqlalchemy
+          pip install -r requirements.txt
+
+      - name: Scan database security
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/scan_database_security.py
+
+      - name: Check user permissions
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/check_user_permissions.py
+
+      - name: Audit database access
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/audit_database_access.py
+
+      - name: Check encryption settings
+        run: |
+          export DATABASE_URL=$DATABASE_URL
+          python scripts/check_encryption_settings.py
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-scan
+          path: security-scan-report.json
+
+  notify-team:
+    needs: [database-migration, database-backup, database-restore, database-optimization, database-analysis, database-cleanup, database-security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Notify database team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.DATABASE_WEBHOOK_URL;
+            const operation = '${{ github.event.inputs.operation || 'scheduled' }}';
+            const environment = '${{ github.event.inputs.environment || 'staging' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🗄️ Database Operation Completed: ${operation}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Operation',
+                      value: operation,
+                      short: true
+                    }, {
+                      title: 'Environment',
+                      value: environment,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-monitoring:
+    needs: [database-optimization, database-analysis]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download analysis results
+        uses: actions/download-artifact@v3
+        with:
+          path: results
+
+      - name: Update monitoring dashboards
+        run: |
+          echo "Updating monitoring dashboards with database metrics..."
+          # Add monitoring update logic here
+
+      - name: Update alerting rules
+        run: |
+          echo "Updating alerting rules based on database analysis..."
+          # Add alerting rules update logic here
+
+  cleanup:
+    needs: [database-migration, database-backup, database-restore, database-optimization, database-analysis, database-cleanup, database-security-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup artifacts
+        run: |
+          echo "Cleaning up database artifacts..."
+          # Add cleanup logic here

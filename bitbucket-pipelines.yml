@@ -1,0 +1,74 @@
+name: Bitbucket Pipelines
+
+image: cirrusci/flutter:3.16.0
+
+pipelines:
+  default:
+    - step:
+        name: Test and Analyze
+        caches:
+          - gradle
+          - flutter
+        script:
+          - flutter pub get
+          - flutter analyze
+          - flutter test --coverage
+          - genhtml coverage/lcov.info -o coverage/html
+        artifacts:
+          - coverage/**
+        services:
+          - docker
+
+  branches:
+    main:
+      - step:
+          name: Build and Deploy
+          caches:
+            - gradle
+            - flutter
+          script:
+            - flutter pub get
+            - flutter build web --web-renderer canvaskit --release
+            - echo "Deploying to production"
+            # Add your production deployment script here
+          artifacts:
+            - build/web/**
+
+    develop:
+      - step:
+          name: Build and Deploy to Staging
+          caches:
+            - gradle
+            - flutter
+          script:
+            - flutter pub get
+            - flutter build web --web-renderer canvaskit --release
+            - echo "Deploying to staging"
+            # Add your staging deployment script here
+          artifacts:
+            - build/web/**
+
+    release/*:
+      - step:
+          name: Build Release
+          caches:
+            - gradle
+            - flutter
+          script:
+            - flutter pub get
+            - flutter build apk --release
+            - flutter build appbundle --release
+            - flutter build web --web-renderer canvaskit --release
+          artifacts:
+            - build/app/outputs/flutter-apk/**
+            - build/app/outputs/bundle/**
+            - build/web/**
+
+definitions:
+  caches:
+    flutter:
+      key: flutter-v1
+      path: $HOME/.pub-cache
+    gradle:
+      key: gradle-v1
+      path: $HOME/.gradle/caches

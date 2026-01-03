@@ -1,0 +1,146 @@
+name: Azure DevOps Pipeline
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  tags:
+    include:
+    - v*
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  flutterVersion: '3.16.0'
+  javaVersion: '17'
+
+stages:
+- stage: Test
+  displayName: 'Test Stage'
+  jobs:
+  - job: FlutterTest
+    displayName: 'Flutter Tests'
+    steps:
+    - task: FlutterInstall@0
+      inputs:
+        channel: 'stable'
+        version: '$(flutterVersion)'
+    
+    - task: FlutterTest@0
+      inputs:
+        generateCodeCoverageReport: true
+        failIfTestsFail: true
+    
+    - task: PublishCodeCoverageResults@1
+      inputs:
+        codeCoverageTool: Cobertura
+        summaryFileLocation: 'coverage/cobertura.xml'
+
+  - job: FlutterAnalyze
+    displayName: 'Flutter Analysis'
+    steps:
+    - task: FlutterInstall@0
+      inputs:
+        channel: 'stable'
+        version: '$(flutterVersion)'
+    
+    - task: FlutterAnalyze@0
+      inputs:
+        failOnIssues: true
+
+- stage: Build
+  displayName: 'Build Stage'
+  dependsOn: Test
+  jobs:
+  - job: BuildWeb
+    displayName: 'Build Web'
+    steps:
+    - task: FlutterInstall@0
+      inputs:
+        channel: 'stable'
+        version: '$(flutterVersion)'
+    
+    - task: FlutterBuild@0
+      inputs:
+        target: 'web'
+        webRenderer: 'canvaskit'
+        mode: 'release'
+    
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: 'build/web'
+        ArtifactName: 'web-build'
+
+  - job: BuildAndroid
+    displayName: 'Build Android'
+    steps:
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '$(javaVersion)'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+    
+    - task: FlutterInstall@0
+      inputs:
+        channel: 'stable'
+        version: '$(flutterVersion)'
+    
+    - task: FlutterBuild@0
+      inputs:
+        target: 'apk'
+        mode: 'release'
+    
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: 'build/app/outputs/flutter-apk'
+        ArtifactName: 'android-apk'
+
+  - job: BuildWindows
+    displayName: 'Build Windows'
+    steps:
+    - task: FlutterInstall@0
+      inputs:
+        channel: 'stable'
+        version: '$(flutterVersion)'
+    
+    - task: FlutterBuild@0
+      inputs:
+        target: 'windows'
+        mode: 'release'
+    
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: 'build/windows/runner/Release'
+        ArtifactName: 'windows-build'
+
+- stage: Deploy
+  displayName: 'Deploy Stage'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - job: DeployWeb
+    displayName: 'Deploy to Azure Static Web Apps'
+    steps:
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'web-build'
+        downloadPath: '$(System.ArtifactsDirectory)'
+    
+    - task: AzureStaticWebApp@0
+      inputs:
+        app_location: '$(System.ArtifactsDirectory)/web-build'
+        api_token: '$(AZURE_STATIC_WEB_APPS_API_TOKEN)'
+        azure_static_web_apps_api_token: '$(AZURE_STATIC_WEB_APPS_API_TOKEN)'
+        action: 'upload'
+        config_file_location: '$(System.DefaultWorkingDirectory)'
+        output_location: '$(System.ArtifactsDirectory)/web-build'

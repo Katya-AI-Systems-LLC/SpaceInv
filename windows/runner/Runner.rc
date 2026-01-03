@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
+            VALUE "CompanyName", "com.sorydev" "\0"
             VALUE "FileDescription", "Space Invaders" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "Space Invaders" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 com.sorydev. All rights reserved." "\0"
             VALUE "OriginalFilename", "Space Invaders.exe" "\0"
             VALUE "ProductName", "Space Invaders" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

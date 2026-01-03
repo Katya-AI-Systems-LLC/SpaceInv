@@ -1,0 +1,382 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Dependency Management
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM
+  workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Type of dependency update'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'major'
+          - 'minor'
+          - 'patch'
+          - 'security'
+
+jobs:
+  dependency-check:
+    runs-on: ubuntu-latest
+    outputs:
+      vulnerabilities: ${{ steps.check.outputs.vulnerabilities }}
+      outdated: ${{ steps.check.outputs.outdated }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check for vulnerabilities
+        id: check
+        run: |
+          # Check for known vulnerabilities in dependencies
+          echo "Checking for vulnerabilities..."
+          
+          # Use dart pub to check for outdated packages
+          flutter pub outdated --json > outdated.json || true
+          
+          # Parse results
+          VULNERABILITIES=$(cat outdated.json | jq -r '.packages[] | select(.compatibility == "incompatible") | .name' | wc -l || echo "0")
+          OUTDATED=$(cat outdated.json | jq -r '.packages[] | select(.upgradable == true) | .name' | wc -l || echo "0")
+          
+          echo "vulnerabilities=$VULNERABILITIES" >> $GITHUB_OUTPUT
+          echo "outdated=$OUTDATED" >> $GITHUB_OUTPUT
+          
+          echo "Found $VULNERABILITIES vulnerabilities and $OUTDATED outdated packages"
+
+      - name: Generate dependency report
+        run: |
+          python3 scripts/dependency_report_generator.py outdated.json > dependency-report.md
+
+      - name: Upload dependency report
+        uses: actions/upload-artifact@v3
+        with:
+          name: dependency-report
+          path: |
+            dependency-report.md
+            outdated.json
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run security audit
+        run: |
+          # Check for known security vulnerabilities
+          echo "Running security audit..."
+          
+          # Use dart pub to check for security advisories
+          flutter pub deps --json > deps.json
+          
+          # Check against known vulnerability database
+          python3 scripts/security_audit.py deps.json > security-audit.json
+
+      - name: Upload security audit
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-audit
+          path: |
+            security-audit.json
+            deps.json
+
+  dependency-update:
+    needs: [dependency-check, security-audit]
+    runs-on: ubuntu-latest
+    if: needs.dependency-check.outputs.vulnerabilities > 0 || needs.dependency-check.outputs.outdated > 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Update dependencies
+        run: |
+          echo "Updating dependencies..."
+          
+          # Update based on input type
+          UPDATE_TYPE="${{ github.event.inputs.update_type || 'all' }}"
+          
+          case "$UPDATE_TYPE" in
+            "all")
+              flutter pub upgrade --major-versions
+              ;;
+            "major")
+              flutter pub upgrade --major-versions
+              ;;
+            "minor")
+              flutter pub upgrade
+              ;;
+            "patch")
+              flutter pub upgrade
+              ;;
+            "security")
+              flutter pub upgrade
+              ;;
+          esac
+
+      - name: Run tests
+        run: |
+          echo "Running tests after dependency update..."
+          flutter test --coverage
+
+      - name: Check for breaking changes
+        run: |
+          echo "Checking for breaking changes..."
+          flutter analyze --fatal-infos --fatal-warnings
+
+      - name: Create dependency update PR
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update dependencies'
+          title: 'chore: update dependencies'
+          body: |
+            ## 🔄 Dependency Update
+            
+            This PR updates project dependencies to the latest versions.
+            
+            ### 📊 Update Summary
+            - **Update Type**: ${{ github.event.inputs.update_type || 'all' }}
+            - **Vulnerabilities Fixed**: ${{ needs.dependency-check.outputs.vulnerabilities }}
+            - **Outdated Packages Updated**: ${{ needs.dependency-check.outputs.outdated }}
+            
+            ### 🧪 Testing
+            - [ ] All tests pass
+            - [ ] No breaking changes detected
+            - [ ] Code analysis passes
+            
+            ### 📋 Checklist
+            - [ ] Dependencies updated successfully
+            - [ ] Application builds without errors
+            - [ ] All tests pass
+            - [ ] No breaking changes introduced
+            
+            ---
+            
+            🤖 This PR was created automatically by the dependency management workflow.
+          branch: dependency-update
+          delete-branch: true
+
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check licenses
+        run: |
+          echo "Checking license compatibility..."
+          
+          # Generate license report
+          flutter pub deps --style=tree > license-report.txt
+          
+          # Check for problematic licenses
+          python3 scripts/license_checker.py license-report.txt > license-compliance.json
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-report
+          path: |
+            license-report.txt
+            license-compliance.json
+
+  dependency-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate dependency graph
+        run: |
+          echo "Generating dependency graph..."
+          
+          # Generate dependency graph
+          flutter pub deps --style=tree > dependency-tree.txt
+          
+          # Create visual dependency graph
+          python3 scripts/dependency_graph_generator.py dependency-tree.txt > dependency-graph.svg
+
+      - name: Upload dependency graph
+        uses: actions/upload-artifact@v3
+        with:
+          name: dependency-graph
+          path: |
+            dependency-tree.txt
+            dependency-graph.svg
+
+  version-bump:
+    needs: [dependency-check, security-audit]
+    runs-on: ubuntu-latest
+    if: needs.dependency-check.outputs.vulnerabilities > 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install semantic-release
+        run: npm install -g semantic-release
+
+      - name: Configure semantic-release
+        run: |
+          cat > .releaserc.json << EOF
+          {
+            "branches": ["main"],
+            "plugins": [
+              "@semantic-release/commit-analyzer",
+              "@semantic-release/release-notes-generator",
+              "@semantic-release/changelog",
+              "@semantic-release/npm",
+              "@semantic-release/github",
+              "@semantic-release/git"
+            ]
+          }
+          EOF
+
+      - name: Bump version
+        run: |
+          echo "Bumping version for security update..."
+          semantic-release --dry-run
+
+  notify-team:
+    needs: [dependency-check, security-audit, dependency-update]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+
+      - name: Notify team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.TEAM_WEBHOOK_URL;
+            const vulnerabilities = '${{ needs.dependency-check.outputs.vulnerabilities }}';
+            const outdated = '${{ needs.dependency-check.outputs.outdated }}';
+            
+            if (webhookUrl && (vulnerabilities > 0 || outdated > 0)) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔄 Dependency Management Report`,
+                  attachments: [{
+                    color: vulnerabilities > 0 ? 'warning' : 'good',
+                    fields: [{
+                      title: 'Vulnerabilities Found',
+                      value: vulnerabilities,
+                      short: true
+                    }, {
+                      title: 'Outdated Packages',
+                      value: outdated,
+                      short: true
+                    }, {
+                      title: 'Action Taken',
+                      value: vulnerabilities > 0 ? 'Dependencies Updated' : 'No Action Needed',
+                      short: false
+                    }, {
+                      title: 'View Report',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  update-dependency-dashboard:
+    needs: [dependency-check, security-audit, license-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+
+      - name: Update dependency dashboard
+        run: |
+          echo "Updating dependency dashboard..."
+          
+          # Generate dashboard data
+          python3 scripts/dependency_dashboard_generator.py reports/ > dependency-dashboard.json
+          
+          # Update GitHub project board
+          echo "Updating project board with dependency issues..."
+
+      - name: Upload dashboard
+        uses: actions/upload-artifact@v3
+        with:
+          name: dependency-dashboard
+          path: dependency-dashboard.json
+
+  cleanup:
+    needs: [dependency-check, security-audit, dependency-update, license-check]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup old artifacts
+        run: |
+          echo "Cleaning up old dependency artifacts..."
+          # Add cleanup logic here

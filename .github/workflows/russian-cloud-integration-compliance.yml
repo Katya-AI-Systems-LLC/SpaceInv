@@ -1,0 +1,715 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Russian Cloud Integration and Compliance
+on:
+  push:
+    branches: [main, develop, infrastructure/*]
+    paths:
+      - 'cloud/russian/**'
+      - 'infrastructure/russian/**'
+      - 'compliance/russian/**'
+      - 'scripts/russian_cloud_*.py'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'cloud/russian/**'
+      - 'infrastructure/russian/**'
+      - 'compliance/russian/**'
+      - 'scripts/russian_cloud_*.py'
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+  workflow_dispatch:
+    inputs:
+      cloud_action:
+        description: 'Russian cloud action to perform'
+        required: true
+        type: choice
+        options:
+          - 'deploy'
+          - 'monitor'
+          - 'backup'
+          - 'security'
+          - 'compliance'
+          - 'audit'
+          - 'optimize'
+          - 'all'
+      cloud_provider:
+        description: 'Russian cloud provider'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'yandex'
+          - 'vk'
+          - 'selectel'
+          - 'mailru'
+          - 'timeweb'
+      compliance_check:
+        description: 'Compliance check to perform'
+        required: true
+        type: choice
+        options:
+          - 'data_residency'
+          - 'federal_law_152'
+          - 'pci_dss'
+          - 'iso27001'
+          - 'gdpr'
+          - 'all'
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - 'all'
+          - 'development'
+          - 'staging'
+          - 'production'
+
+jobs:
+  yandex-cloud-integration:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud_provider == 'all' || github.event.inputs.cloud_provider == 'yandex' || github.event.inputs.cloud_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Yandex Cloud tools
+        run: |
+          pip install yandexcloud
+          pip install boto3  # Yandex Cloud S3 compatible
+          pip install -r requirements.txt
+          curl -sSL https://storage.yandexcloud.net/install-yandex-cli | bash
+
+      - name: Configure Yandex Cloud credentials
+        run: |
+          echo "Configuring Yandex Cloud credentials..."
+          yc config set token ${{ secrets.YANDEX_CLOUD_TOKEN }}
+          yc config set cloud-id ${{ secrets.YANDEX_CLOUD_ID }}
+          yc config set folder-id ${{ secrets.YANDEX_FOLDER_ID }}
+
+      - name: Deploy to Yandex Cloud
+        if: github.event.inputs.cloud_action == 'deploy' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "🇷🇺 Deploying to Yandex Cloud..."
+          
+          # Deploy to Yandex Cloud Functions
+          python scripts/deploy_yandex_cloud_functions.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/yandex/functions-config.json \
+            --output yandex-functions-deployment.json
+
+          # Deploy to Yandex Cloud Storage
+          python scripts/deploy_yandex_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/yandex/storage-config.json \
+            --output yandex-storage-deployment.json
+
+          # Deploy to Yandex Cloud API Gateway
+          python scripts/deploy_yandex_cloud_api_gateway.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/yandex/api-gateway-config.json \
+            --output yandex-api-gateway-deployment.json
+
+          # Deploy to Yandex Cloud Database
+          python scripts/deploy_yandex_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/yandex/database-config.json \
+            --output yandex-database-deployment.json
+
+      - name: Monitor Yandex Cloud
+        if: github.event.inputs.cloud_action == 'monitor' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "📊 Monitoring Yandex Cloud..."
+          
+          # Monitor Yandex Cloud Functions
+          python scripts/monitor_yandex_cloud_functions.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-functions-monitoring.json
+
+          # Monitor Yandex Cloud Storage
+          python scripts/monitor_yandex_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-storage-monitoring.json
+
+          # Monitor Yandex Cloud Database
+          python scripts/monitor_yandex_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-database-monitoring.json
+
+          # Generate Yandex Cloud monitoring report
+          python scripts/generate_yandex_cloud_monitoring_report.py \
+            --functions-monitoring yandex-functions-monitoring.json \
+            --storage-monitoring yandex-storage-monitoring.json \
+            --database-monitoring yandex-database-monitoring.json \
+            --output yandex-cloud-monitoring-report.json
+
+      - name: Backup Yandex Cloud
+        if: github.event.inputs.cloud_action == 'backup' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "💾 Backing up Yandex Cloud..."
+          
+          # Backup Yandex Cloud Storage
+          python scripts/backup_yandex_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-storage-backup.json
+
+          # Backup Yandex Cloud Database
+          python scripts/backup_yandex_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-database-backup.json
+
+          # Backup Yandex Cloud Functions configuration
+          python scripts/backup_yandex_cloud_functions.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-functions-backup.json
+
+      - name: Security audit Yandex Cloud
+        if: github.event.inputs.cloud_action == 'security' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "🔒 Security auditing Yandex Cloud..."
+          
+          # Security audit Yandex Cloud Functions
+          python scripts/security_audit_yandex_cloud_functions.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-functions-security-audit.json
+
+          # Security audit Yandex Cloud Storage
+          python scripts/security_audit_yandex_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-storage-security-audit.json
+
+          # Security audit Yandex Cloud Database
+          python scripts/security_audit_yandex_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-database-security-audit.json
+
+          # Generate Yandex Cloud security report
+          python scripts/generate_yandex_cloud_security_report.py \
+            --functions-security yandex-functions-security-audit.json \
+            --storage-security yandex-storage-security-audit.json \
+            --database-security yandex-database-security-audit.json \
+            --output yandex-cloud-security-report.json
+
+      - name: Compliance check Yandex Cloud
+        if: github.event.inputs.cloud_action == 'compliance' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "🏛️ Compliance checking Yandex Cloud..."
+          
+          # Data residency compliance
+          python scripts/check_yandex_data_residency_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-data-residency-compliance.json
+
+          # Federal Law #152-FZ compliance
+          python scripts/check_yandex_federal_law_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-federal-law-compliance.json
+
+          # Generate Yandex Cloud compliance report
+          python scripts/generate_yandex_cloud_compliance_report.py \
+            --data-residency yandex-data-residency-compliance.json \
+            --federal-law yandex-federal-law-compliance.json \
+            --output yandex-cloud-compliance-report.json
+
+      - name: Optimize Yandex Cloud
+        if: github.event.inputs.cloud_action == 'optimize' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "⚡ Optimizing Yandex Cloud..."
+          
+          # Optimize Yandex Cloud Functions
+          python scripts/optimize_yandex_cloud_functions.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-functions-optimization.json
+
+          # Optimize Yandex Cloud Storage
+          python scripts/optimize_yandex_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-storage-optimization.json
+
+          # Optimize Yandex Cloud Database
+          python scripts/optimize_yandex_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-database-optimization.json
+
+          # Generate Yandex Cloud optimization report
+          python scripts/generate_yandex_cloud_optimization_report.py \
+            --functions-optimization yandex-functions-optimization.json \
+            --storage-optimization yandex-storage-optimization.json \
+            --database-optimization yandex-database-optimization.json \
+            --output yandex-cloud-optimization-report.json
+
+      - name: Upload Yandex Cloud results
+        uses: actions/upload-artifact@v3
+        with:
+          name: yandex-cloud-results
+          path: |
+            yandex-functions-deployment.json
+            yandex-storage-deployment.json
+            yandex-api-gateway-deployment.json
+            yandex-database-deployment.json
+            yandex-functions-monitoring.json
+            yandex-storage-monitoring.json
+            yandex-database-monitoring.json
+            yandex-cloud-monitoring-report.json
+            yandex-storage-backup.json
+            yandex-database-backup.json
+            yandex-functions-backup.json
+            yandex-functions-security-audit.json
+            yandex-storage-security-audit.json
+            yandex-database-security-audit.json
+            yandex-cloud-security-report.json
+            yandex-data-residency-compliance.json
+            yandex-federal-law-compliance.json
+            yandex-cloud-compliance-report.json
+            yandex-functions-optimization.json
+            yandex-storage-optimization.json
+            yandex-database-optimization.json
+            yandex-cloud-optimization-report.json
+
+  vk-cloud-integration:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud_provider == 'all' || github.event.inputs.cloud_provider == 'vk' || github.event.inputs.cloud_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install VK Cloud tools
+        run: |
+          pip install -r requirements.txt
+          # Add VK Cloud specific tools installation
+
+      - name: Configure VK Cloud credentials
+        run: |
+          echo "Configuring VK Cloud credentials..."
+          export VK_CLOUD_TOKEN="${{ secrets.VK_CLOUD_TOKEN }}"
+          export VK_CLOUD_PROJECT_ID="${{ secrets.VK_CLOUD_PROJECT_ID }}"
+
+      - name: Deploy to VK Cloud
+        if: github.event.inputs.cloud_action == 'deploy' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "☁️ Deploying to VK Cloud..."
+          
+          # Deploy to VK Cloud Container Registry
+          python scripts/deploy_vk_cloud_container_registry.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/vk/container-registry-config.json \
+            --output vk-container-registry-deployment.json
+
+          # Deploy to VK Cloud Storage
+          python scripts/deploy_vk_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/vk/storage-config.json \
+            --output vk-storage-deployment.json
+
+          # Deploy to VK Cloud Database
+          python scripts/deploy_vk_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/vk/database-config.json \
+            --output vk-database-deployment.json
+
+      - name: Monitor VK Cloud
+        if: github.event.inputs.cloud_action == 'monitor' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "📊 Monitoring VK Cloud..."
+          
+          # Monitor VK Cloud Container Registry
+          python scripts/monitor_vk_cloud_container_registry.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-container-registry-monitoring.json
+
+          # Monitor VK Cloud Storage
+          python scripts/monitor_vk_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-storage-monitoring.json
+
+          # Monitor VK Cloud Database
+          python scripts/monitor_vk_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-database-monitoring.json
+
+          # Generate VK Cloud monitoring report
+          python scripts/generate_vk_cloud_monitoring_report.py \
+            --container-registry-monitoring vk-container-registry-monitoring.json \
+            --storage-monitoring vk-storage-monitoring.json \
+            --database-monitoring vk-database-monitoring.json \
+            --output vk-cloud-monitoring-report.json
+
+      - name: Security audit VK Cloud
+        if: github.event.inputs.cloud_action == 'security' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "🔒 Security auditing VK Cloud..."
+          
+          # Security audit VK Cloud Container Registry
+          python scripts/security_audit_vk_cloud_container_registry.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-container-registry-security-audit.json
+
+          # Security audit VK Cloud Storage
+          python scripts/security_audit_vk_cloud_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-storage-security-audit.json
+
+          # Security audit VK Cloud Database
+          python scripts/security_audit_vk_cloud_database.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-database-security-audit.json
+
+          # Generate VK Cloud security report
+          python scripts/generate_vk_cloud_security_report.py \
+            --container-registry-security vk-container-registry-security-audit.json \
+            --storage-security vk-storage-security-audit.json \
+            --database-security vk-database-security-audit.json \
+            --output vk-cloud-security-report.json
+
+      - name: Upload VK Cloud results
+        uses: actions/upload-artifact@v3
+        with:
+          name: vk-cloud-results
+          path: |
+            vk-container-registry-deployment.json
+            vk-storage-deployment.json
+            vk-database-deployment.json
+            vk-container-registry-monitoring.json
+            vk-storage-monitoring.json
+            vk-database-monitoring.json
+            vk-cloud-monitoring-report.json
+            vk-container-registry-security-audit.json
+            vk-storage-security-audit.json
+            vk-database-security-audit.json
+            vk-cloud-security-report.json
+
+  selectel-integration:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud_provider == 'all' || github.event.inputs.cloud_provider == 'selectel' || github.event.inputs.cloud_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Selectel tools
+        run: |
+          pip install -r requirements.txt
+          # Add Selectel specific tools installation
+
+      - name: Configure Selectel credentials
+        run: |
+          echo "Configuring Selectel credentials..."
+          export SELECTEL_TOKEN="${{ secrets.SELECTEL_TOKEN }}"
+          export SELECTEL_PROJECT_ID="${{ secrets.SELECTEL_PROJECT_ID }}"
+
+      - name: Deploy to Selectel
+        if: github.event.inputs.cloud_action == 'deploy' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "☁️ Deploying to Selectel..."
+          
+          # Deploy to Selectel Storage
+          python scripts/deploy_selectel_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/selectel/storage-config.json \
+            --output selectel-storage-deployment.json
+
+          # Deploy to Selectel Servers
+          python scripts/deploy_selectel_servers.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --config cloud/russian/selectel/servers-config.json \
+            --output selectel-servers-deployment.json
+
+      - name: Monitor Selectel
+        if: github.event.inputs.cloud_action == 'monitor' || github.event.inputs.cloud_action == 'all'
+        run: |
+          echo "📊 Monitoring Selectel..."
+          
+          # Monitor Selectel Storage
+          python scripts/monitor_selectel_storage.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output selectel-storage-monitoring.json
+
+          # Monitor Selectel Servers
+          python scripts/monitor_selectel_servers.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output selectel-servers-monitoring.json
+
+          # Generate Selectel monitoring report
+          python scripts/generate_selectel_monitoring_report.py \
+            --storage-monitoring selectel-storage-monitoring.json \
+            --servers-monitoring selectel-servers-monitoring.json \
+            --output selectel-monitoring-report.json
+
+      - name: Upload Selectel results
+        uses: actions/upload-artifact@v3
+        with:
+          name: selectel-results
+          path: |
+            selectel-storage-deployment.json
+            selectel-servers-deployment.json
+            selectel-storage-monitoring.json
+            selectel-servers-monitoring.json
+            selectel-monitoring-report.json
+
+  russian-compliance-audit:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.cloud_action == 'compliance' || github.event.inputs.cloud_action == 'audit' || github.event.inputs.cloud_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install compliance audit tools
+        run: |
+          pip install -r requirements.txt
+          pip install pandas
+          pip install openpyxl
+
+      - name: Data Residency Compliance Audit
+        if: github.event.inputs.compliance_check == 'data_residency' || github.event.inputs.compliance_check == 'all'
+        run: |
+          echo "🏛️ Data Residency Compliance Audit..."
+          
+          # Audit Yandex Cloud data residency
+          python scripts/audit_yandex_data_residency.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output yandex-data-residency-audit.json
+
+          # Audit VK Cloud data residency
+          python scripts/audit_vk_data_residency.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output vk-data-residency-audit.json
+
+          # Audit Selectel data residency
+          python scripts/audit_selectel_data_residency.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output selectel-data-residency-audit.json
+
+      - name: Federal Law #152-FZ Compliance Audit
+        if: github.event.inputs.compliance_check == 'federal_law_152' || github.event.inputs.compliance_check == 'all'
+        run: |
+          echo "⚖️ Federal Law #152-FZ Compliance Audit..."
+          
+          # Audit Federal Law compliance
+          python scripts/audit_federal_law_152_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output federal-law-152-audit.json
+
+      - name: PCI DSS Compliance Audit
+        if: github.event.inputs.compliance_check == 'pci_dss' || github.event.inputs.compliance_check == 'all'
+        run: |
+          echo "💳 PCI DSS Compliance Audit..."
+          
+          # Audit PCI DSS compliance
+          python scripts/audit_pci_dss_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output pci-dss-audit.json
+
+      - name: ISO 27001 Compliance Audit
+        if: github.event.inputs.compliance_check == 'iso27001' || github.event.inputs.compliance_check == 'all'
+        run: |
+          echo "🔒 ISO 27001 Compliance Audit..."
+          
+          # Audit ISO 27001 compliance
+          python scripts/audit_iso27001_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output iso27001-audit.json
+
+      - name: GDPR Compliance Audit
+        if: github.event.inputs.compliance_check == 'gdpr' || github.event.inputs.compliance_check == 'all'
+        run: |
+          echo "🇪🇺 GDPR Compliance Audit..."
+          
+          # Audit GDPR compliance
+          python scripts/audit_gdpr_compliance.py \
+            --environment "${{ github.event.inputs.environment || 'development' }}" \
+            --output gdpr-audit.json
+
+      - name: Generate comprehensive compliance report
+        run: |
+          python scripts/generate_comprehensive_compliance_report.py \
+            --data-residency yandex-data-residency-audit.json vk-data-residency-audit.json selectel-data-residency-audit.json \
+            --federal-law federal-law-152-audit.json \
+            --pci-dss pci-dss-audit.json \
+            --iso27001 iso27001-audit.json \
+            --gdpr gdpr-audit.json \
+            --output comprehensive-compliance-report.json
+
+      - name: Upload compliance audit results
+        uses: actions/upload-artifact@v3
+        with:
+          name: russian-compliance-audit-results
+          path: |
+            yandex-data-residency-audit.json
+            vk-data-residency-audit.json
+            selectel-data-residency-audit.json
+            federal-law-152-audit.json
+            pci-dss-audit.json
+            iso27001-audit.json
+            gdpr-audit.json
+            comprehensive-compliance-report.json
+
+  comprehensive-russian-cloud-report:
+    needs: [yandex-cloud-integration, vk-cloud-integration, selectel-integration, russian-compliance-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all Russian cloud reports
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+
+      - name: Generate comprehensive Russian cloud report
+        run: |
+          python scripts/generate_comprehensive_russian_cloud_report.py \
+            --input-dir reports \
+            --output comprehensive-russian-cloud-report.json
+
+      - name: Generate Russian cloud dashboard
+        run: |
+          python scripts/generate_russian_cloud_dashboard.py \
+            --comprehensive-report comprehensive-russian-cloud-report.json \
+            --output russian-cloud-dashboard.html
+
+      - name: Upload comprehensive Russian cloud reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-russian-cloud-reports
+          path: |
+            comprehensive-russian-cloud-report.json
+            russian-cloud-dashboard.html
+
+  notify-russian-cloud-team:
+    needs: [comprehensive-russian-cloud-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-russian-cloud-reports
+          path: report
+
+      - name: Notify Russian cloud team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.RUSSIAN_CLOUD_WEBHOOK_URL;
+            const cloudAction = '${{ github.event.inputs.cloud_action || 'automated' }}';
+            const cloudProvider = '${{ github.event.inputs.cloud_provider || 'all' }}';
+            const complianceCheck = '${{ github.event.inputs.compliance_check || 'all' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `☁️ Russian Cloud Operations Completed: ${cloudAction}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Cloud Action',
+                      value: cloudAction,
+                      short: true
+                    }, {
+                      title: 'Cloud Provider',
+                      value: cloudProvider,
+                      short: true
+                    }, {
+                      title: 'Compliance Check',
+                      value: complianceCheck,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  create-russian-cloud-issues:
+    needs: [comprehensive-russian-cloud-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-russian-cloud-reports
+          path: report
+
+      - name: Create Russian cloud issues for critical findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('report/comprehensive-russian-cloud-report.json', 'utf8'));
+            
+            // Create issues for critical Russian cloud findings
+            if (report.critical_issues && report.critical_issues.length > 0) {
+              for (const issue of report.critical_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `☁️ Russian Cloud Issue: ${issue.title}`,
+                  body: `## Russian Cloud Issue\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**Provider**: ${issue.provider}\n\n**Service**: ${issue.service}\n\n**Impact**: ${issue.impact}\n\n**Recommendation**: ${issue.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['russian-cloud', 'critical', 'automated-finding']
+                });
+              }
+            }
+
+  update-russian-cloud-dashboard:
+    needs: [comprehensive-russian-cloud-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-russian-cloud-reports
+          path: report
+
+      - name: Update Russian cloud dashboard
+        run: |
+          echo "Updating Russian cloud dashboard with latest results..."
+          # Add dashboard update logic here
+
+      - name: Update Russian cloud metrics
+        run: |
+          echo "Updating Russian cloud metrics..."
+          # Add metrics update logic here
+
+  cleanup:
+    needs: [yandex-cloud-integration, vk-cloud-integration, selectel-integration, russian-compliance-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup Russian cloud artifacts
+        run: |
+          echo "Cleaning up Russian cloud artifacts..."
+          # Add cleanup logic here

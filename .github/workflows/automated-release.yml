@@ -1,0 +1,309 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Automated Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web
+        run: flutter build web --web-renderer canvaskit --release
+
+      - name: Build Android
+        run: |
+          flutter build apk --release
+          flutter build appbundle --release
+
+      - name: Build Windows
+        run: flutter build windows --release
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          # Get version from tag
+          VERSION=${{ github.ref_name }}
+          VERSION=${VERSION#v}
+          
+          # Get commit history since last release
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          # Generate changelog
+          if [ -n "$LAST_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s" $LAST_TAG..HEAD)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s")
+          fi
+          
+          # Create release notes
+          cat > release_notes.md << EOF
+          # Space Invaders Enhanced Edition v$VERSION
+          
+          ## 🚀 What's New
+          
+          $CHANGELOG
+          
+          ## 📱 Platforms
+          - Web: ✅
+          - Android: ✅
+          - Windows: ✅
+          
+          ## 📦 Downloads
+          - Web: [Play Now](https://space-invaders.com)
+          - Android: [Download APK](https://github.com/${{ github.repository }}/releases/download/v${VERSION}/app-release.apk)
+          - Windows: [Download EXE](https://github.com/${{ github.repository }}/releases/download/v${VERSION}/space-invaders-enhanced.exe)
+          
+          ## 🔧 Installation
+          
+          ### Web
+          1. Visit [space-invaders.com](https://space-invaders.com)
+          2. Click "Play Now"
+          3. Enjoy the game!
+          
+          ### Android
+          1. Download the APK file
+          2. Enable "Unknown Sources" in settings
+          3. Install the APK
+          4. Launch the game
+          
+          ### Windows
+          1. Download the EXE file
+          2. Run the installer
+          3. Launch the game from desktop
+          
+          ## 🐛 Bug Reports
+          Found a bug? [Report it here](https://github.com/${{ github.repository }}/issues)
+          
+          ## 🚀 Feature Requests
+          Have an idea? [Request it here](https://github.com/${{ github.repository }}/issues/new?template=feature_request.md)
+          
+          ## 📚 Documentation
+          - [User Guide](https://docs.space-invaders.com)
+          - [Developer Guide](https://docs.space-invaders.com/developer)
+          - [API Documentation](https://docs.space-invaders.com/api)
+          
+          ---
+          **Thanks for playing Space Invaders Enhanced Edition! 🎮**
+          EOF
+          
+          echo "release_notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: Upload Web Assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: build/web/
+          asset_name: space-invaders-web.zip
+          asset_content_type: application/zip
+
+      - name: Upload Android APK
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: build/app/outputs/flutter-apk/app-release.apk
+          asset_name: app-release.apk
+          asset_content_type: application/vnd.android.package-archive.apk
+
+      - name: Upload Android App Bundle
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: build/app/outputs/bundle/release/app-release.aab
+          asset_name: app-release.aab
+          asset_content_type: application/vnd.android.package-archive
+
+      - name: Upload Windows Build
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: build/windows/runner/Release/
+          asset_name: space-invaders-enhanced.zip
+          asset_content_type: application/zip
+
+      - name: Deploy to Web
+        run: |
+          # Deploy to web hosting
+          echo "Deploying to web hosting..."
+          # Add your web deployment commands here
+
+      - name: Deploy to Stores
+        run: |
+          # Deploy to app stores
+          echo "Deploying to app stores..."
+          # Add your store deployment commands here
+
+      - name: Update Documentation
+        run: |
+          # Update documentation with new version
+          echo "Updating documentation..."
+          # Add your documentation update commands here
+
+      - name: Notify Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Send notification to team
+            const webhookUrl = process.env.TEAM_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🚀 New Release: ${context.ref}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Version',
+                      value: context.ref_name,
+                      short: true
+                    }, {
+                      title: 'Released by',
+                      value: context.actor.login,
+                      short: true
+                    }, {
+                      title: 'Release Notes',
+                      value: `https://github.com/${{ context.repository }}/releases/tag/${{ context.ref_name }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+      - name: Update Analytics
+        run: |
+          # Update analytics with new release
+          echo "Updating analytics..."
+          # Add your analytics update commands here
+
+      - name: Post to Social Media
+        run: |
+          # Post to social media
+          echo "Posting to social media..."
+          # Add your social media posting commands here
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run Security Scan
+        uses: securecodewarrior/github-action-add-sarif@v1
+        with:
+          sarif-file: 'security-scan-results.sarif'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'security-scan-results.sarif'
+
+  performance-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Web
+        run: flutter build web --web-renderer canvaskit --release
+
+      - name: Run Performance Tests
+        run: |
+          # Run performance tests
+          echo "Running performance tests..."
+          # Add your performance test commands here
+
+      - name: Upload Performance Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: performance-results.json
+
+  compatibility-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [web, android, windows]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build ${{ matrix.platform }}
+        run: |
+          case "${{ matrix.platform }}" in
+            web)
+              flutter build web --web-renderer canvaskit --release
+              ;;
+            android)
+              flutter build apk --release
+              ;;
+            windows)
+              flutter build windows --release
+              ;;
+          esac
+
+      - name: Run Compatibility Tests
+        run: |
+          # Run compatibility tests
+          echo "Running compatibility tests for ${{ matrix.platform }}..."
+          # Add your compatibility test commands here
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        with:
+          name: compatibility-results-${{ matrix.platform }}
+          path: compatibility-results-${{ matrix.platform }}.json

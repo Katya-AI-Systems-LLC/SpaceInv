@@ -1,0 +1,118 @@
+name: Selectel CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Run tests
+      run: flutter test --coverage
+    
+    - name: Analyze code
+      run: flutter analyze
+    
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        file: coverage/lcov.info
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Build web version
+      run: flutter build web --web-renderer canvaskit --release
+    
+    - name: Setup Selectel CLI
+      run: |
+        # Install Selectel CLI
+        pip install selectel-storage-cli
+        
+        # Configure Selectel
+        mkdir -p ~/.config/selectel
+        cat > ~/.config/selectel/config.yaml << EOF
+        auth_url: https://api.selcdn.ru
+        username: ${{ secrets.SELECTEL_USERNAME }}
+        password: ${{ secrets.SELECTEL_PASSWORD }}
+        container_name: ${{ secrets.SELECTEL_CONTAINER }}
+        EOF
+    
+    - name: Deploy to Selectel Storage
+      run: |
+        selectel-storage upload \
+          --source build/web/ \
+          --destination / \
+          --recursive
+    
+    - name: Setup CDN
+      run: |
+        # Invalidate CDN cache
+        curl -X POST "https://api.selcdn.ru/v1/containers/${{ secrets.SELECTEL_CONTAINER }}/cdn/invalidate" \
+          -H "X-Auth-Token: ${{ secrets.SELECTEL_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{"paths": ["/*"]}'
+
+  deploy-to-cloud-servers:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Build web version
+      run: flutter build web --web-renderer canvaskit --release
+    
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.5.0
+      with:
+        ssh-private-key: ${{ secrets.SELECTEL_SSH_KEY }}
+    
+    - name: Deploy to Selectel Cloud Servers
+      run: |
+        ssh -o StrictHostKeyChecking=no ${{ secrets.SELECTEL_SSH_USER }}@${{ secrets.SELECTEL_SERVER_IP }} << 'EOF'
+          cd /var/www/space-invaders
+          git pull origin main
+          flutter pub get
+          flutter build web --web-renderer canvaskit --release
+          sudo systemctl reload nginx
+        EOF

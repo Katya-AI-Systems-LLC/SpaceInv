@@ -1,0 +1,134 @@
+name: GitLab CI/CD Pipeline
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  FLUTTER_VERSION: "3.16.0"
+  ANDROID_COMPILE_SDK: "34"
+  ANDROID_BUILD_TOOLS: "34.0.0"
+  ANDROID_SDK_TOOLS: "34.0.0"
+
+# Cache Flutter dependencies
+cache:
+  paths:
+    - .flutter/
+    - .pub-cache/
+
+before_script:
+  - apt-get update -qqy
+  - apt-get install -qqy git curl unzip libglu1-mesa-dev
+  - git clone https://github.com/flutter/flutter.git /opt/flutter -b stable
+  - export PATH="/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:$PATH"
+  - export PUB_CACHE="/opt/flutter/.pub-cache"
+  - flutter channel stable
+  - flutter upgrade
+  - flutter doctor
+  - flutter pub get
+
+# Test stage
+test:unit:
+  stage: test
+  script:
+    - flutter test --coverage
+    - genhtml coverage/lcov.info -o coverage/html
+  coverage: '/Coverage: \d+\.\d+%/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage/cobertura.xml
+    paths:
+      - coverage/html/
+  only:
+    - merge_requests
+    - main
+    - develop
+
+test:analyze:
+  stage: test
+  script:
+    - flutter analyze
+    - dart format --set-exit-if-changed .
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Build stage
+build:web:
+  stage: build
+  script:
+    - flutter build web --web-renderer canvaskit --release
+  artifacts:
+    paths:
+      - build/web/
+  only:
+    - main
+    - develop
+
+build:android:
+  stage: build
+  script:
+    - flutter build apk --release
+    - flutter build appbundle --release
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/bundle/release/app-release.aab
+  only:
+    - main
+    - develop
+
+build:windows:
+  stage: build
+  tags:
+    - windows
+  script:
+    - flutter config --enable-windows-desktop
+    - flutter build windows --release
+  artifacts:
+    paths:
+      - build/windows/runner/Release/
+  only:
+    - main
+    - develop
+
+# Deploy stage
+deploy:staging:
+  stage: deploy
+  script:
+    - echo "Deploying to staging environment"
+    # Add your staging deployment script here
+  environment:
+    name: staging
+    url: https://staging.space-invaders.com
+  only:
+    - develop
+
+deploy:production:
+  stage: deploy
+  script:
+    - echo "Deploying to production"
+    # Add your production deployment script here
+  environment:
+    name: production
+    url: https://space-invaders.com
+  when: manual
+  only:
+    - main
+
+# Pages deployment for GitLab Pages
+pages:
+  stage: deploy
+  script:
+    - mkdir -p public
+    - cp -r build/web/* public/
+    - cp -r coverage/html/* public/coverage/
+  artifacts:
+    paths:
+      - public
+  only:
+    - main

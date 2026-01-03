@@ -1,0 +1,753 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Legal Compliance and Community Management
+on:
+  push:
+    branches: [main, develop, feature/*, hotfix/*]
+    paths:
+      - 'legal/**'
+      - 'compliance/**'
+      - 'privacy/**'
+      - 'community/**'
+      - 'support/**'
+      - 'docs/**'
+      - 'web/**'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'legal/**'
+      - 'compliance/**'
+      - 'privacy/**'
+      - 'community/**'
+      - 'support/**'
+      - 'docs/**'
+      - 'web/**'
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+    - cron: '0 1 * * 0'  # Weekly on Sunday at 1 AM
+  workflow_dispatch:
+    inputs:
+      legal_action:
+        description: 'Legal compliance action to perform'
+        required: true
+        type: choice
+        options:
+          - 'audit'
+          - 'scan'
+          - 'check'
+          - 'report'
+          - 'update'
+          - 'all'
+      community_action:
+        description: 'Community management action to perform'
+        required: true
+        type: choice
+        options:
+          - 'engage'
+          - 'moderate'
+          - 'analyze'
+          - 'support'
+          - 'content'
+          - 'all'
+      compliance_framework:
+        description: 'Compliance framework to check'
+        required: true
+        type: choice
+        options:
+          - 'federal_law_152'
+          - 'federal_law_149'
+          - 'gdpr'
+          - 'pci_dss'
+          - 'iso27001'
+          - 'all'
+      target_region:
+        description: 'Target region for compliance'
+        required: true
+        type: choice
+        options:
+          - 'russia'
+          - 'eu'
+          - 'global'
+          - 'all'
+
+jobs:
+  legal-compliance-audit:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.legal_action == 'audit' || github.event.inputs.legal_action == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install legal compliance tools
+        run: |
+          pip install -r requirements.txt
+          pip install pandas
+          pip install openpyxl
+          pip install python-docx
+          pip install beautifulsoup4
+          pip install requests
+
+      - name: Federal Law #152-FZ Compliance Audit
+        if: github.event.inputs.compliance_framework == 'federal_law_152' || github.event.inputs.compliance_framework == 'all'
+        run: |
+          echo "⚖️ Federal Law #152-FZ Compliance Audit..."
+          
+          # Audit personal data processing
+          python scripts/audit_personal_data_processing.py \
+            --source-dir lib/ \
+            --config legal/federal-law-152/config.json \
+            --output personal-data-audit.json
+          
+          # Audit data localization
+          python scripts/audit_data_localization.py \
+            --infrastructure-config infrastructure/ \
+            --config legal/federal-law-152/localization.json \
+            --output data-localization-audit.json
+          
+          # Audit consent management
+          python scripts/audit_consent_management.py \
+            --source-dir lib/ \
+            --config legal/federal-law-152/consent.json \
+            --output consent-management-audit.json
+          
+          # Audit data breach procedures
+          python scripts/audit_data_breach_procedures.py \
+            --procedures-dir legal/procedures/ \
+            --config legal/federal-law-152/breach.json \
+            --output data-breach-audit.json
+
+      - name: Federal Law #149-FZ Compliance Audit
+        if: github.event.inputs.compliance_framework == 'federal_law_149' || github.event.inputs.compliance_framework == 'all'
+        run: |
+          echo "📡 Federal Law #149-FZ Compliance Audit..."
+          
+          # Audit information system requirements
+          python scripts/audit_information_systems.py \
+            --infrastructure-config infrastructure/ \
+            --config legal/federal-law-149/systems.json \
+            --output information-systems-audit.json
+          
+          # Audit personal data operators
+          python scripts/audit_personal_data_operators.py \
+            --config legal/federal-law-149/operators.json \
+            --output data-operators-audit.json
+          
+          # Audit data processing notifications
+          python scripts/audit_processing_notifications.py \
+            --notifications-dir legal/notifications/ \
+            --config legal/federal-law-149/notifications.json \
+            --output processing-notifications-audit.json
+
+      - name: GDPR Compliance Audit
+        if: github.event.inputs.compliance_framework == 'gdpr' || github.event.inputs.compliance_framework == 'all'
+        run: |
+          echo "🇪🇺 GDPR Compliance Audit..."
+          
+          # Audit GDPR principles
+          python scripts/audit_gdpr_principles.py \
+            --source-dir lib/ \
+            --config legal/gdpr/principles.json \
+            --output gdpr-principles-audit.json
+          
+          # Audit data subject rights
+          python scripts/audit_data_subject_rights.py \
+            --source-dir lib/ \
+            --config legal/gdpr/subject-rights.json \
+            --output data-subject-rights-audit.json
+          
+          # Audit DPIA requirements
+          python scripts/audit_dpia_requirements.py \
+            --processes-dir legal/processes/ \
+            --config legal/gdpr/dpia.json \
+            --output dpia-audit.json
+          
+          # Audit international transfers
+          python scripts/audit_international_transfers.py \
+            --transfers-dir legal/transfers/ \
+            --config legal/gdpr/transfers.json \
+            --output international-transfers-audit.json
+
+      - name: PCI DSS Compliance Audit
+        if: github.event.inputs.compliance_framework == 'pci_dss' || github.event.inputs.compliance_framework == 'all'
+        run: |
+          echo "💳 PCI DSS Compliance Audit..."
+          
+          # Audit card data handling
+          python scripts/audit_card_data_handling.py \
+            --source-dir lib/ \
+            --config legal/pci-dss/card-data.json \
+            --output card-data-audit.json
+          
+          # Audit network security
+          python scripts/audit_network_security.py \
+            --infrastructure-config infrastructure/ \
+            --config legal/pci-dss/network-security.json \
+            --output network-security-audit.json
+          
+          # Audit access control
+          python scripts/audit_access_control.py \
+            --access-config security/access/ \
+            --config legal/pci-dss/access-control.json \
+            --output access-control-audit.json
+
+      - name: ISO 27001 Compliance Audit
+        if: github.event.inputs.compliance_framework == 'iso27001' || github.event.inputs.compliance_framework == 'all'
+        run: |
+          echo "🔒 ISO 27001 Compliance Audit..."
+          
+          # Audit ISMS implementation
+          python scripts/audit_isms_implementation.py \
+            --isms-docs security/isms/ \
+            --config legal/iso27001/isms.json \
+            --output isms-audit.json
+          
+          # Audit risk assessment
+          python scripts/audit_risk_assessment.py \
+            --risk-docs security/risk/ \
+            --config legal/iso27001/risk.json \
+            --output risk-assessment-audit.json
+          
+          # Audit security controls
+          python scripts/audit_security_controls.py \
+            --controls-config security/controls/ \
+            --config legal/iso27001/controls.json \
+            --output security-controls-audit.json
+
+      - name: Generate comprehensive legal compliance report
+        run: |
+          python scripts/generate_comprehensive_legal_compliance_report.py \
+            --federal-law-152 personal-data-audit.json data-localization-audit.json consent-management-audit.json data-breach-audit.json \
+            --federal-law-149 information-systems-audit.json data-operators-audit.json processing-notifications-audit.json \
+            --gdpr gdpr-principles-audit.json data-subject-rights-audit.json dpia-audit.json international-transfers-audit.json \
+            --pci-dss card-data-audit.json network-security-audit.json access-control-audit.json \
+            --iso27001 isms-audit.json risk-assessment-audit.json security-controls-audit.json \
+            --output comprehensive-legal-compliance-report.json
+
+      - name: Upload legal compliance audit results
+        uses: actions/upload-artifact@v3
+        with:
+          name: legal-compliance-audit-results
+          path: |
+            personal-data-audit.json
+            data-localization-audit.json
+            consent-management-audit.json
+            data-breach-audit.json
+            information-systems-audit.json
+            data-operators-audit.json
+            processing-notifications-audit.json
+            gdpr-principles-audit.json
+            data-subject-rights-audit.json
+            dpia-audit.json
+            international-transfers-audit.json
+            card-data-audit.json
+            network-security-audit.json
+            access-control-audit.json
+            isms-audit.json
+            risk-assessment-audit.json
+            security-controls-audit.json
+            comprehensive-legal-compliance-report.json
+
+  legal-document-scan:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.legal_action == 'scan' || github.event.inputs.legal_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install document scanning tools
+        run: |
+          pip install -r requirements.txt
+          pip install python-docx
+          pip install PyPDF2
+          pip install beautifulsoup4
+          pip install nltk
+          pip install spacy
+
+      - name: Scan privacy policy
+        run: |
+          python scripts/scan_privacy_policy.py \
+            --policy-file legal/privacy-policy.md \
+            --config legal/privacy-scan.json \
+            --output privacy-policy-scan.json
+
+      - name: Scan terms of service
+        run: |
+          python scripts/scan_terms_of_service.py \
+            --tos-file legal/terms-of-service.md \
+            --config legal/tos-scan.json \
+            --output terms-of-service-scan.json
+
+      - name: Scan user agreements
+        run: |
+          python scripts/scan_user_agreements.py \
+            --agreements-dir legal/agreements/ \
+            --config legal/agreements-scan.json \
+            --output user-agreements-scan.json
+
+      - name: Scan legal notices
+        run: |
+          python scripts/scan_legal_notices.py \
+            --notices-dir legal/notices/ \
+            --config legal/notices-scan.json \
+            --output legal-notices-scan.json
+
+      - name: Generate document scan report
+        run: |
+          python scripts/generate_document_scan_report.py \
+            --privacy-scan privacy-policy-scan.json \
+            --tos-scan terms-of-service-scan.json \
+            --agreements-scan user-agreements-scan.json \
+            --notices-scan legal-notices-scan.json \
+            --output document-scan-report.json
+
+      - name: Upload document scan results
+        uses: actions/upload-artifact@v3
+        with:
+          name: legal-document-scan-results
+          path: |
+            privacy-policy-scan.json
+            terms-of-service-scan.json
+            user-agreements-scan.json
+            legal-notices-scan.json
+            document-scan-report.json
+
+  community-engagement:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.community_action == 'engage' || github.event.inputs.community_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install community management tools
+        run: |
+          pip install -r requirements.txt
+          pip install pandas
+          pip install matplotlib
+          pip install seaborn
+          pip install requests
+          pip install tweepy
+          pip install discord.py
+          pip install praw
+
+      - name: Analyze community engagement
+        run: |
+          echo "🌍 Analyzing community engagement..."
+          
+          # Analyze social media engagement
+          python scripts/analyze_social_media_engagement.py \
+            --config community/social-media-config.json \
+            --output social-media-engagement.json
+          
+          # Analyze forum engagement
+          python scripts/analyze_forum_engagement.py \
+            --config community/forum-config.json \
+            --output forum-engagement.json
+          
+          # Analyze Discord engagement
+          python scripts/analyze_discord_engagement.py \
+            --config community/discord-config.json \
+            --output discord-engagement.json
+          
+          # Analyze Telegram engagement
+          python scripts/analyze_telegram_engagement.py \
+            --config community/telegram-config.json \
+            --output telegram-engagement.json
+
+      - name: Generate community insights
+        run: |
+          python scripts/generate_community_insights.py \
+            --social-media social-media-engagement.json \
+            --forum forum-engagement.json \
+            --discord discord-engagement.json \
+            --telegram telegram-engagement.json \
+            --output community-insights.json
+
+      - name: Create community engagement report
+        run: |
+          python scripts/create_community_engagement_report.py \
+            --insights community-insights.json \
+            --output community-engagement-report.html
+
+      - name: Upload community engagement results
+        uses: actions/upload-artifact@v3
+        with:
+          name: community-engagement-results
+          path: |
+            social-media-engagement.json
+            forum-engagement.json
+            discord-engagement.json
+            telegram-engagement.json
+            community-insights.json
+            community-engagement-report.html
+
+  community-moderation:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.community_action == 'moderate' || github.event.inputs.community_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install moderation tools
+        run: |
+          pip install -r requirements.txt
+          pip install transformers
+          pip install torch
+          pip install nltk
+          pip install spacy
+          pip install textblob
+
+      - name: Moderate community content
+        run: |
+          echo "🛡️ Moderating community content..."
+          
+          # Moderate forum content
+          python scripts/moderate_forum_content.py \
+            --config community/moderation/forum-config.json \
+            --output forum-moderation.json
+          
+          # Moderate Discord content
+          python scripts/moderate_discord_content.py \
+            --config community/moderation/discord-config.json \
+            --output discord-moderation.json
+          
+          # Moderate social media content
+          python scripts/moderate_social_media_content.py \
+            --config community/moderation/social-media-config.json \
+            --output social-media-moderation.json
+          
+          # Moderate user-generated content
+          python scripts/moderate_user_content.py \
+            --config community/moderation/user-content-config.json \
+            --output user-content-moderation.json
+
+      - name: Generate moderation report
+        run: |
+          python scripts/generate_moderation_report.py \
+            --forum forum-moderation.json \
+            --discord discord-moderation.json \
+            --social-media social-media-moderation.json \
+            --user-content user-content-moderation.json \
+            --output moderation-report.json
+
+      - name: Upload moderation results
+        uses: actions/upload-artifact@v3
+        with:
+          name: community-moderation-results
+          path: |
+            forum-moderation.json
+            discord-moderation.json
+            social-media-moderation.json
+            user-content-moderation.json
+            moderation-report.json
+
+  support-analytics:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.community_action == 'support' || github.event.inputs.community_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install support analytics tools
+        run: |
+          pip install -r requirements.txt
+          pip install pandas
+          pip install matplotlib
+          pip install seaborn
+          pip install plotly
+          pip install jupyter
+
+      - name: Analyze support performance
+        run: |
+          echo "📞 Analyzing support performance..."
+          
+          # Analyze support tickets
+          python scripts/analyze_support_tickets.py \
+            --tickets-data support/tickets-data.json \
+            --output support-tickets-analysis.json
+          
+          # Analyze response times
+          python scripts/analyze_response_times.py \
+            --response-data support/response-data.json \
+            --output response-times-analysis.json
+          
+          # Analyze customer satisfaction
+          python scripts/analyze_customer_satisfaction.py \
+            --satisfaction-data support/satisfaction-data.json \
+            --output satisfaction-analysis.json
+          
+          # Analyze support trends
+          python scripts/analyze_support_trends.py \
+            --trends-data support/trends-data.json \
+            --output support-trends-analysis.json
+
+      - name: Generate support dashboard
+        run: |
+          python scripts/generate_support_dashboard.py \
+            --tickets support-tickets-analysis.json \
+            --response-times response-times-analysis.json \
+            --satisfaction satisfaction-analysis.json \
+            --trends support-trends-analysis.json \
+            --output support-dashboard.html
+
+      - name: Upload support analytics results
+        uses: actions/upload-artifact@v3
+        with:
+          name: support-analytics-results
+          path: |
+            support-tickets-analysis.json
+            response-times-analysis.json
+            satisfaction-analysis.json
+            support-trends-analysis.json
+            support-dashboard.html
+
+  content-management:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.community_action == 'content' || github.event.inputs.community_action == 'all'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install content management tools
+        run: |
+          pip install -r requirements.txt
+          pip install markdown
+          pip install jinja2
+          pip install beautifulsoup4
+
+      - name: Update documentation
+        run: |
+          echo "📚 Updating documentation..."
+          
+          # Update FAQ
+          python scripts/update_faq.py \
+            --support-data support/tickets-data.json \
+            --template docs/faq-template.md \
+            --output docs/faq.md
+          
+          # Update knowledge base
+          python scripts/update_knowledge_base.py \
+            --support-data support/tickets-data.json \
+            --template docs/kb-template.md \
+            --output docs/knowledge-base/
+          
+          # Update user guides
+          python scripts/update_user_guides.py \
+            --config docs/guides-config.json \
+            --output docs/user-guides/
+          
+          # Update tutorials
+          python scripts/update_tutorials.py \
+            --config docs/tutorials-config.json \
+            --output docs/tutorials/
+
+      - name: Generate content analytics
+        run: |
+          python scripts/generate_content_analytics.py \
+            --docs-dir docs/ \
+            --output content-analytics.json
+
+      - name: Upload content management results
+        uses: actions/upload-artifact@v3
+        with:
+          name: content-management-results
+          path: |
+            docs/faq.md
+            docs/knowledge-base/
+            docs/user-guides/
+            docs/tutorials/
+            content-analytics.json
+
+  comprehensive-legal-community-report:
+    needs: [legal-compliance-audit, legal-document-scan, community-engagement, community-moderation, support-analytics, content-management]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all legal and community reports
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+
+      - name: Generate comprehensive legal and community report
+        run: |
+          python scripts/generate_comprehensive_legal_community_report.py \
+            --input-dir reports \
+            --output comprehensive-legal-community-report.json
+
+      - name: Generate executive summary
+        run: |
+          python scripts/generate_executive_summary.py \
+            --comprehensive-report comprehensive-legal-community-report.json \
+            --output executive-summary.json
+
+      - name: Upload comprehensive reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: comprehensive-legal-community-reports
+          path: |
+            comprehensive-legal-community-report.json
+            executive-summary.json
+
+  notify-legal-community-team:
+    needs: [comprehensive-legal-community-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-legal-community-reports
+          path: report
+
+      - name: Notify legal and community team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.LEGAL_COMMUNITY_WEBHOOK_URL;
+            const legalAction = '${{ github.event.inputs.legal_action || 'automated' }}';
+            const communityAction = '${{ github.event.inputs.community_action || 'automated' }}';
+            const complianceFramework = '${{ github.event.inputs.compliance_framework || 'all' }}';
+            
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `⚖️🌍 Legal Compliance and Community Management Completed: ${legalAction} / ${communityAction}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Legal Action',
+                      value: legalAction,
+                      short: true
+                    }, {
+                      title: 'Community Action',
+                      value: communityAction,
+                      short: true
+                    }, {
+                      title: 'Compliance Framework',
+                      value: complianceFramework,
+                      short: true
+                    }, {
+                      title: 'Repository',
+                      value: '${{ github.repository }}',
+                      short: true
+                    }, {
+                      title: 'Commit',
+                      value: '${{ github.sha }}',
+                      short: true
+                    }, {
+                      title: 'Action URL',
+                      value: `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`,
+                      short: false
+                    }]
+                  }]
+                })
+              });
+            }
+
+  create-legal-community-issues:
+    needs: [comprehensive-legal-community-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-legal-community-reports
+          path: report
+
+      - name: Create legal and community issues for critical findings
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('report/comprehensive-legal-community-report.json', 'utf8'));
+            
+            // Create issues for critical legal findings
+            if (report.critical_legal_issues && report.critical_legal_issues.length > 0) {
+              for (const issue of report.critical_legal_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `⚖️ Legal Issue: ${issue.title}`,
+                  body: `## Legal Issue\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**Framework**: ${issue.framework}\n\n**Regulation**: ${issue.regulation}\n\n**Impact**: ${issue.impact}\n\n**Recommendation**: ${issue.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['legal', 'critical', 'automated-finding']
+                });
+              }
+            }
+            
+            // Create issues for critical community findings
+            if (report.critical_community_issues && report.critical_community_issues.length > 0) {
+              for (const issue of report.critical_community_issues) {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: `🌍 Community Issue: ${issue.title}`,
+                  body: `## Community Issue\n\n**Description**: ${issue.description}\n\n**Priority**: Critical\n\n**Platform**: ${issue.platform}\n\n**Metric**: ${issue.metric}\n\n**Impact**: ${issue.impact}\n\n**Recommendation**: ${issue.recommendation}\n\n**Report**: [View Full Report](${context.payload.html_url})`,
+                  labels: ['community', 'critical', 'automated-finding']
+                });
+              }
+            }
+
+  update-legal-community-dashboard:
+    needs: [comprehensive-legal-community-report]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download comprehensive report
+        uses: actions/download-artifact@v3
+        with:
+          name: comprehensive-legal-community-reports
+          path: report
+
+      - name: Update legal and community dashboard
+        run: |
+          echo "Updating legal and community dashboard with latest results..."
+          # Add dashboard update logic here
+
+      - name: Update legal and community metrics
+        run: |
+          echo "Updating legal and community metrics..."
+          # Add metrics update logic here
+
+  cleanup:
+    needs: [legal-compliance-audit, legal-document-scan, community-engagement, community-moderation, support-analytics, content-management]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Cleanup legal and community artifacts
+        run: |
+          echo "Cleaning up legal and community artifacts..."
+          # Add cleanup logic here

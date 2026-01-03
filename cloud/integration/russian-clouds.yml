@@ -1,0 +1,722 @@
+# Russian Cloud Integration Templates for Space Invaders Enhanced Edition
+
+## Yandex Cloud Integration
+
+### Yandex Cloud Functions
+```yaml
+# yandex-cloud-function.yml
+name: Deploy to Yandex Cloud Functions
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Yandex Cloud CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo 'export PATH=$PATH:$HOME/yandex-cloud/bin' >> $HOME/.bashrc
+          source $HOME/.bashrc
+
+      - name: Configure Yandex Cloud
+        run: |
+          yc config profile create sa-profile
+          yc config set service-account-key ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+
+      - name: Build Function
+        run: |
+          npm run build:function
+
+      - name: Deploy Function
+        run: |
+          yc serverless function create \
+            --name space-invaders-function \
+            --runtime nodejs16 \
+            --entrypoint index.js \
+            --memory 512m \
+            --execution-timeout 10s
+
+      - name: Update Function Code
+        run: |
+          yc serverless function version create \
+            --function-name space-invaders-function \
+            --runtime nodejs16 \
+            --entrypoint index.js \
+            --memory 512m \
+            --execution-timeout 10s \
+            --source-path build/
+```
+
+### Yandex Cloud Storage
+```yaml
+# yandex-cloud-storage.yml
+name: Deploy to Yandex Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Yandex Cloud CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo 'export PATH=$PATH:$HOME/yandex-cloud/bin' >> $HOME/.bashrc
+          source $HOME/.bashrc
+
+      - name: Configure Yandex Cloud
+        run: |
+          yc config profile create sa-profile
+          yc config set service-account-key ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Deploy to Storage
+        run: |
+          yc storage s3 cp --recursive build/web/ s3://${{ secrets.YC_BUCKET_NAME }}/ --endpoint-url=https://storage.yandexcloud.net
+
+      - name: Setup CDN
+        run: |
+          yc cdn cache invalidate --folder-id ${{ secrets.YC_FOLDER_ID }} --path "/*"
+```
+
+### Yandex Cloud API Gateway
+```yaml
+# yandex-cloud-api-gateway.yml
+name: Deploy to Yandex Cloud API Gateway
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Yandex Cloud CLI
+        run: |
+          curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+          echo 'export PATH=$PATH:$HOME/yandex-cloud/bin' >> $HOME/.bashrc
+          source $HOME/.bashrc
+
+      - name: Configure Yandex Cloud
+        run: |
+          yc config profile create sa-profile
+          yc config set service-account-key ${{ secrets.YC_SERVICE_ACCOUNT_KEY }}
+          yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+
+      - name: Deploy API Gateway
+        run: |
+          yc api-gateway create \
+            --name space-invaders-api \
+            --spec 'openapi: 3.0.0\ninfo:\n  title: Space Invaders API\n  version: 1.0.0\npaths:\n  /api/health:\n    get:\n      x-yc-apigateway-integration:\n        type: cloud_function\n        function_id: space-invaders-function'
+
+      - name: Update Gateway
+        run: |
+          yc api-gateway update \
+            --name space-invaders-api \
+            --spec 'openapi: 3.0.0\ninfo:\n  title: Space Invaders API\n  version: 1.0.0\npaths:\n  /api/health:\n    get:\n      x-yc-apigateway-integration:\n        type: cloud_function\n        function_id: space-invaders-function'
+```
+
+## VK Cloud Integration
+
+### VK Cloud Container Registry
+```yaml
+# vk-cloud-registry.yml
+name: Deploy to VK Cloud Container Registry
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to VK Cloud Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ secrets.VK_CLOUD_REGISTRY }}
+          username: ${{ secrets.VK_CLOUD_USERNAME }}
+          password: ${{ secrets.VK_CLOUD_PASSWORD }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.VK_CLOUD_REGISTRY }}/space-invaders:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy to VK Cloud
+        run: |
+          curl -X POST "$VK_CLOUD_DEPLOY_URL" -H "Authorization: Bearer $VK_CLOUD_TOKEN" -d '{"image":"${{ secrets.VK_CLOUD_REGISTRY }}/space-invaders:latest"}'
+```
+
+### VK Cloud Storage
+```yaml
+# vk-cloud-storage.yml
+name: Deploy to VK Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Deploy to VK Cloud Storage
+        run: |
+          curl -X POST "$VK_CLOUD_STORAGE_URL" -H "Authorization: Bearer $VK_CLOUD_TOKEN" -F "file=@build/web/index.html"
+          curl -X POST "$VK_CLOUD_STORAGE_URL" -H "Authorization: Bearer $VK_CLOUD_TOKEN" -F "file=@build/web/main.dart.js"
+          curl -X POST "$VK_CLOUD_STORAGE_URL" -H "Authorization: Bearer $VK_CLOUD_TOKEN" -F "file=@build/web/assets/"
+```
+
+### VK Cloud Database
+```yaml
+# vk-cloud-database.yml
+name: Deploy to VK Cloud Database
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup VK Cloud CLI
+        run: |
+          curl -sSL https://vk.com/cloud/cli/install.sh | bash
+          echo 'export PATH=$PATH:$HOME/vk-cloud/bin' >> $HOME/.bashrc
+          source $HOME/.bashrc
+
+      - name: Configure VK Cloud
+        run: |
+          vk-cloud auth login \
+            --token ${{ secrets.VK_CLOUD_TOKEN }} \
+            --project-id ${{ secrets.VK_CLOUD_PROJECT_ID }}
+
+      - name: Deploy Database Schema
+        run: |
+          vk-cloud database create \
+            --name space-invaders-db \
+            --engine postgres \
+            --size small \
+            --version 15
+
+      - name: Run Migrations
+        run: |
+          vk-cloud database execute \
+            --name space-invaders-db \
+            --file migrations/schema.sql
+```
+
+## Selectel Integration
+
+### Selectel Cloud Storage
+```yaml
+# selectel-storage.yml
+name: Deploy to Selectel Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to Selectel Storage
+        run: |
+          pip install selectel-storage-cli
+          mkdir -p ~/.config/selectel
+          cat > ~/.config/selectel/config.yaml << EOF
+          auth_url: https://api.selcdn.ru
+          username: ${{ secrets.SELECTEL_USERNAME }}
+          password: ${{ secrets.SELECTEL_PASSWORD }}
+          container_name: ${{ secrets.SELECTEL_CONTAINER }}
+          EOF
+          
+          selectel-storage upload \
+            --source build/web/ \
+            --destination / \
+            --recursive
+
+      - name: Setup CDN
+        run: |
+          curl -X POST "https://api.selcdn.ru/v1/containers/${{ secrets.SELECTEL_CONTAINER }}/cdn/invalidate" \
+            -H "X-Auth-Token: ${{ secrets.SELECTEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"paths": ["/*"]}'
+```
+
+### Selectel Cloud Servers
+```yaml
+# selectel-servers.yml
+name: Deploy to Selectel Cloud Servers
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup SSH Key
+        uses: webfactory/ssh-agent@v0.5.0
+        with:
+          ssh-private-key: ${{ secrets.SELECTEL_SSH_KEY }}
+
+      - name: Deploy to Server
+        run: |
+          ssh ${{ secrets.SELECTEL_SSH_USER }}@${{ secrets.SELECTEL_SERVER_IP }} << 'EOF'
+            cd /var/www/space-invaders
+            git pull origin main
+            flutter pub get
+            flutter build web --web-renderer canvaskit --release
+            sudo systemctl reload nginx
+          EOF
+
+      - name: Health Check
+        run: |
+          curl -f https://${{ secrets.SELECTEL_SERVER_IP }}/health || exit 1
+```
+
+## Mail.Ru Integration
+
+### Mail.Ru Cloud Storage
+```yaml
+# mailru-cloud-storage.yml
+name: Deploy to Mail.Ru Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to Mail.Ru Cloud
+        run: |
+          curl -X PUT "https://cloud.mail.ru/api/v1/storage/file" \
+            -H "Authorization: Bearer ${{ secrets.MAILRU_TOKEN }}" \
+            -H "X-Storage-Name: ${{ secrets.MAILRU_STORAGE_NAME }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @build/web/index.html \
+            --data-binary @build/web/main.dart.js
+```
+
+## Timeweb Cloud Integration
+
+### Timeweb Cloud Storage
+```yaml
+# timeweb-cloud-storage.yml
+name: Deploy to Timeweb Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to Timeweb Cloud
+        run: |
+          curl -X POST "https://api.timeweb.cloud/v1/storage/upload" \
+            -H "Authorization: Bearer ${{ secrets.TIMEWEB_TOKEN }}" \
+            -H "X-Storage-Name: ${{ secrets.TIMEWEB_STORAGE_NAME }}" \
+            -F "file=@build/web/index.html" \
+            -F "file=@build/web/main.dart.js"
+```
+
+## MTS Cloud Integration
+
+### MTS Cloud Storage
+```yaml
+# mts-cloud-storage.yml
+name: Deploy to MTS Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to MTS Cloud
+        run: |
+          curl -X POST "https://cloud.mts.ru/api/v1/storage/upload" \
+            -H "Authorization: Bearer ${{ secrets.MTS_TOKEN }}" \
+            -H "X-Storage-Name: ${{ secrets.MTS_STORAGE_NAME }}" \
+            -F "file=@build/web/index.html" \
+            -F "file=@build/web/main.dart.js"
+```
+
+## Beeline Cloud Integration
+
+### Beeline Cloud Storage
+```yaml
+# beeline-cloud-storage.yml
+name: Deploy to Beeline Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to Beeline Cloud
+        run: |
+          curl -X POST "https://cloud.beeline.ru/api/v1/storage/upload" \
+            -H "Authorization: Bearer ${{ secrets.BEELINE_TOKEN }}" \
+            -H "X-Storage-Name: ${{ secrets.BEELINE_STORAGE_NAME }}" \
+            -F "file=@build/web/index.html" \
+            -F "file=@build/web/main.dart.js"
+```
+
+## Megafon Cloud Integration
+
+### Megafon Cloud Storage
+```yaml
+# megafon-cloud-storage.yml
+name: Deploy to Megafon Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Upload to Megafon Cloud
+        run: |
+          curl -X POST "https://cloud.megafon.ru/api/v1/storage/upload" \
+            -H "Authorization: Bearer ${{ secrets.MEGAFON_TOKEN }}" \
+            -H "X-Storage-Name: ${{ secrets.MEGAFON_STORAGE_NAME }}" \
+            -F "file=@build/web/index.html" \
+            -F "file=@build/web/main.dart.js"
+```
+
+## Regional Cloud Integration
+
+### Regional Cloud Storage Template
+```yaml
+# regional-cloud-storage.yml
+name: Deploy to Regional Cloud Storage
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [yandex, vk, selectel, mailru, timeweb, mts, beeline, megafon]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Deploy to ${{ matrix.provider }} Cloud
+        run: |
+          echo "Deploying to ${{ matrix.provider }} cloud storage"
+          # Add provider-specific deployment commands here
+          if [ "${{ matrix.provider }}" = "yandex" ]; then
+            echo "Deploying to Yandex Cloud"
+            # Yandex Cloud specific commands
+          elif [ "${{ matrix.provider }}" = "vk" ]; then
+            echo "Deploying to VK Cloud"
+            # VK Cloud specific commands
+          elif [ "${{ matrix.provider }}" = "selectel" ]; then
+            echo "Deploying to Selectel"
+            # Selectel specific commands
+          fi
+```
+
+## Multi-Cloud Deployment
+```yaml
+# multi-cloud-deployment.yml
+name: Deploy to Multiple Russian Cloud Providers
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [yandex, vk, selectel]
+        region: [ru-central1, ru-west, ru-east]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Build Web App
+        run: |
+          flutter build web --web-renderer canvaskit --release
+
+      - name: Deploy to ${{ matrix.provider }} in ${{ matrix.region }}
+        run: |
+          echo "Deploying to ${{ matrix.provider }} in ${{ matrix.region }}"
+          # Add multi-cloud deployment logic here
+          
+      - name: Update DNS Records
+        run: |
+          echo "Updating DNS records for ${{ matrix.provider }}"
+          # Add DNS update logic here
+
+      - name: Setup CDN
+        run: |
+          echo "Setting up CDN for ${{ matrix.provider }}"
+          # Add CDN setup logic here
+
+      - name: Health Check
+        run: |
+          echo "Performing health check for ${{ matrix.provider }}"
+          # Add health check logic here
+
+      - name: Notify Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.TEAM_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🚀 Deployed to ${{ matrix.provider }} in ${{ matrix.region }}`,
+                  attachments: [{
+                    color: 'good',
+                    fields: [{
+                      title: 'Provider',
+                      value: '${{ matrix.provider }}',
+                      short: true
+                    }, {
+                      title: 'Region',
+                      value: '${{ matrix.region }}',
+                      short: true
+                    }, {
+                      title: 'Status',
+                      value: 'Success',
+                      short: true
+                    }]
+                  }]
+                })
+              });
+            }
+```
+
+## Russian Cloud Monitoring
+```yaml
+# russian-cloud-monitoring.yml
+name: Monitor Russian Cloud Deployments
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [yandex, vk, selectel]
+    steps:
+      - name: Check ${{ matrix.provider }} Health
+        run: |
+          echo "Checking ${{ matrix.provider }} health"
+          # Add health check logic here
+
+      - name: Check Performance
+        run: |
+          echo "Checking ${{ matrix.provider }} performance"
+          # Add performance check logic here
+
+      - name: Check Security
+        run: |
+          echo "Checking ${{ matrix.provider }} security"
+          # Add security check logic here
+
+      - name: Generate Report
+        run: |
+          echo "Generating ${{ matrix.provider }} report"
+          # Add report generation logic here
+
+      - name: Send Alert
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.ALERT_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🚨 Alert: ${{ matrix.provider }} monitoring failed`,
+                  color: 'danger',
+                  fields: [{
+                    title: 'Provider',
+                    value: '${{ matrix.provider }}',
+                    short: true
+                  }, {
+                    title: 'Time',
+                    value: new Date().toISOString(),
+                    short: true
+                  }]
+                })
+              });
+            }
+```
+
+## Russian Cloud Backup
+```yaml
+# russian-cloud-backup.yml
+name: Backup to Russian Cloud Providers
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        provider: [yandex, vk, selectel]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Create Backup
+        run: |
+          echo "Creating backup for ${{ matrix.provider }}"
+          tar -czf backup-$(date +%Y%m%d)-${{ matrix.provider }}.tar.gz .
+
+      - name: Upload to ${{ matrix.provider }}
+        run: |
+          echo "Uploading backup to ${{ matrix.provider }}"
+          # Add backup upload logic here
+
+      - name: Verify Backup
+        run: |
+          echo "Verifying backup on ${{ matrix.provider }}"
+          # Add backup verification logic here
+
+      - name: Cleanup Old Backups
+        run: |
+          echo "Cleaning up old backups on ${{ matrix.provider }}"
+          # Add cleanup logic here
+
+      - name: Notify Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const webhookUrl = process.env.BACKUP_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `💾 Backup completed for ${{ matrix.provider }}`,
+                  color: 'good',
+                  fields: [{
+                    title: 'Provider',
+                    value: '${{ matrix.provider }}',
+                    short: true
+                  }, {
+                    title: 'Date',
+                    value: new Date().toLocaleDateString(),
+                    short: true
+                  }]
+                })
+              });
+            }
+```

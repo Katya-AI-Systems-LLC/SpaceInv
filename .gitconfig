@@ -1,0 +1,236 @@
+# Git Configuration for Space Invaders Project
+
+[user]
+    name = Space Invaders Developer
+    email = developer@space-invaders.com
+    signingkey = YOUR_GPG_KEY_ID
+
+[core]
+    autocrlf = false
+    safecrlf = warn
+    editor = code
+    pager = less -FRSX
+    quotePath = false
+    precomposeunicode = true
+    protecthfs = false
+    protectntfs = false
+
+[init]
+    defaultBranch = main
+    templatedir = ~/.git-template
+
+[commit]
+    gpgsign = true
+    verbose = true
+
+[tag]
+    gpgsign = true
+    forceSignAnnotated = true
+
+[branch]
+    autosetuprebase = always
+    autosetupmerge = always
+
+[pull]
+    rebase = true
+    ff = only
+
+[push]
+    default = current
+    followTags = true
+
+[alias]
+    # Status and log aliases
+    st = status -sb
+    co = checkout
+    br = branch
+    ci = commit
+    cia = commit --amend
+    cp = cherry-pick
+    rb = rebase
+    rs = reset
+    rv = revert
+    
+    # Log aliases
+    lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    lga = log --graph --all --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    lgm = log --graph --merges --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    
+    # Diff aliases
+    df = diff
+    dfl = diff --stat
+    dfc = diff --cached
+    dt = difftool
+    dft = difftool --dir-diff
+    
+    # Stash aliases
+    sh = stash
+    shs = stash show
+    sha = stash apply
+    shp = stash pop
+    shl = stash list
+    
+    # Remote aliases
+    rmt = remote -v
+    rma = remote add
+    rmr = remote remove
+    rmu = remote update
+    
+    # Tag aliases
+    tg = tag
+    tgl = tag -l
+    tgd = tag -d
+    tgp = tag -p
+    
+    # Clean up aliases
+    clean-branches = "!git branch --merged | grep -v '\\*\\|main\\|develop\\|master' | xargs -n 1 git branch -d"
+    clean-tags = "!git tag | grep -v 'v[0-9]' | xargs -n 1 git tag -d"
+    clean-remote = "!git remote prune origin"
+    
+    # Worktree aliases
+    wt = worktree
+    wta = worktree add
+    wtl = worktree list
+    wtr = worktree remove
+    
+    # Submodule aliases
+    sub = submodule
+    subi = submodule init
+    subu = submodule update
+    subs = submodule sync
+    
+    # Performance aliases
+    quick-commit = "!git add -A && git commit -m 'Quick commit'"
+    quick-push = "!git quick-commit && git push"
+    sync-fork = "!git fetch upstream && git checkout main && git merge upstream/main && git push"
+    
+    # Analysis aliases
+    file-changes = "!git log --name-only --pretty=format: | sort | uniq -c | sort -rg | head -20"
+    commit-stats = "!git shortlog -sn --all"
+    repo-size = "!git count-objects -vH && du -sh .git"
+
+[merge]
+    tool = vscode
+    conflictstyle = diff3
+    summary = true
+    verbosity = 2
+
+[mergetool "vscode"]
+    cmd = code --wait $MERGED
+    trustExitCode = true
+
+[diff]
+    tool = vscode
+    algorithm = patience
+    renames = copies
+    mnemonicprefix = true
+    wordRegex = .
+
+[difftool "vscode"]
+    cmd = code --wait --diff $LOCAL $REMOTE
+    trustExitCode = true
+
+[filter "lfs"]
+    clean = git-lfs clean -- %f
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+    required = true
+
+[http]
+    postBuffer = 524288000
+    maxRequestBuffer = 100M
+    lowSpeedLimit = 0
+    lowSpeedTime = 999999
+
+[credential]
+    helper = manager-core
+
+[credential "https://github.com"]
+    useHttpPath = true
+
+[credential "https://gitlab.com"]
+    useHttpPath = true
+
+[credential "https://bitbucket.org"]
+    useHttpPath = true
+
+[credential "https://git.yandex.ru"]
+    useHttpPath = true
+
+[credential "https://cloud.git.yandex.ru"]
+    useHttpPath = true
+
+[credential "https://git.vk.cloud"]
+    useHttpPath = true
+
+[credential "https://git.selectel.ru"]
+    useHttpPath = true
+
+[url "ssh://git@github.com/"]
+    insteadOf = https://github.com/
+
+[url "ssh://git@gitlab.com/"]
+    insteadOf = https://gitlab.com/
+
+[url "ssh://git@bitbucket.org/"]
+    insteadOf = https://bitbucket.org/
+
+[sendemail]
+    smtpEncryption = tls
+    smtpServer = smtp.gmail.com
+    smtpUser = your-email@gmail.com
+    smtpServerPort = 587
+
+[rebase]
+    autosquash = true
+    autoStash = true
+
+[gc]
+    auto = 256
+    autoDetach = false
+
+[pack]
+    useBitmaps = true
+    writeBitmapIndex = true
+    deltaCacheSize = 512M
+    windowMemory = 256M
+    depth = 50
+    threads = 4
+
+[receive]
+    fsckObjects = true
+    denyCurrentBranch = warn
+    denyNonFastForwards = true
+    advertisePushOptions = true
+
+[transfer]
+    fsckObjects = true
+
+[status]
+    showUntrackedFiles = normal
+
+[log]
+    decorate = short
+    abbrevCommit = true
+    showSignature = true
+
+[interactive]
+    autoStash = true
+
+[sequencer]
+    instructionFormat = -%s
+
+[branch "main"]
+    rebase = true
+
+[branch "develop"]
+    rebase = true
+
+[branch "feature/*"]
+    rebase = true
+
+[branch "hotfix/*"]
+    rebase = true
+
+[branch "release/*"]
+    rebase = true

@@ -1,0 +1,634 @@
+# GitLab CI/CD Templates for Space Invaders Enhanced Edition
+
+# Code Quality and Review Automation Pipeline
+code-quality-review-automation:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install black isort flake8 mypy bandit safety
+    - pip install pylint pydocstyle pycodestyle
+    - pip install pre-commit gitpython requests
+    - npm install -g eslint prettier jshint
+    - flutter pub get
+  script:
+    - echo "🔍 Starting code quality and review automation..."
+    
+    # Code formatting checks
+    - echo "📝 Checking code formatting..."
+    - black --check --diff .
+    - isort --check-only --diff .
+    
+    # Linting
+    - echo "🔍 Running linting checks..."
+    - flake8 --format=json --output-file=flake8-report.json .
+    - pylint --output-format=json . > pylint-report.json || true
+    - mypy --json-report mypy-report . || true
+    
+    # Security analysis
+    - echo "🔒 Running security analysis..."
+    - bandit -r . -f json -o bandit-quality-report.json
+    - safety check --json --output safety-quality-report.json
+    
+    # JavaScript/TypeScript checks
+    - echo "📜 Running JavaScript/TypeScript checks..."
+    - eslint --format=json --output-file=eslint-report.json . || true
+    - jshint --reporter=json . > jshint-report.json || true
+    - prettier --check --format=json . > prettier-report.json || true
+    
+    # Flutter checks
+    - echo "🐦 Running Flutter checks..."
+    - flutter analyze --format=json > flutter-analysis.json || true
+    - dart format --set-exit-if-changed .
+    - flutter analyze --fatal-infos > flutter-lint-report.txt || true
+    
+    # Documentation checks
+    - echo "📚 Checking documentation quality..."
+    - pydocstyle --match='(?!test_).*\.py' . > pydocstyle-report.txt || true
+    - find . -name "*.md" -exec markdownlint {} \; > markdownlint-report.txt || true
+    
+    # Generate comprehensive code quality report
+    - echo "📊 Generating comprehensive code quality report..."
+    - python scripts/generate_code_quality_report.py \
+      --flake8 flake8-report.json \
+      --pylint pylint-report.json \
+      --mypy mypy-report/mypy-report.json \
+      --bandit bandit-quality-report.json \
+      --safety safety-quality-report.json \
+      --eslint eslint-report.json \
+      --jshint jshint-report.json \
+      --prettier prettier-report.json \
+      --flutter flutter-analysis.json \
+      --output comprehensive-code-quality-report.json
+    
+    # Analyze code changes for review
+    - echo "🔍 Analyzing code changes..."
+    - python scripts/analyze_code_changes.py \
+      --base-branch $CI_MERGE_REQUEST_TARGET_BRANCH_NAME \
+      --head-branch $CI_COMMIT_REF_NAME \
+      --output code-changes-analysis.json
+    
+    # Generate automated review comments
+    - echo "💬 Generating automated review comments..."
+    - python scripts/generate_automated_review.py \
+      --code-changes code-changes-analysis.json \
+      --quality-report comprehensive-code-quality-report.json \
+      --output automated-review-comments.json
+  artifacts:
+    reports:
+      junit: comprehensive-code-quality-report.json
+    paths:
+      - flake8-report.json
+      - pylint-report.json
+      - mypy-report/mypy-report.json
+      - bandit-quality-report.json
+      - safety-quality-report.json
+      - eslint-report.json
+      - jshint-report.json
+      - prettier-report.json
+      - flutter-analysis.json
+      - pydocstyle-report.txt
+      - markdownlint-report.txt
+      - comprehensive-code-quality-report.json
+      - code-changes-analysis.json
+      - automated-review-comments.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Advanced Testing and Quality Assurance Pipeline
+advanced-testing-quality-assurance:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install pytest pytest-cov pytest-mock pytest-asyncio
+    - pip install pytest-xdist pytest-html
+    - pip install locust httpx aiohttp
+    - npm install -g jest cypress lighthouse
+    - flutter pub get
+  script:
+    - echo "🧪 Starting advanced testing and quality assurance..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Setup test environment
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    - export TEST_ENVIRONMENT="ci"
+    
+    # Run unit tests
+    - echo "🔬 Running unit tests..."
+    - pytest tests/unit/ \
+      --cov=. \
+      --cov-report=json \
+      --cov-report=html \
+      --cov-report=xml \
+      --junitxml=python-unit-test-results.xml \
+      --html=python-unit-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Run JavaScript unit tests
+    - echo "📜 Running JavaScript unit tests..."
+    - npm test -- --coverage --coverageReporters=json --coverageReporters=html
+    - npm test -- --reporter=junit --outputFile=javascript-unit-test-results.xml
+    
+    # Run Flutter unit tests
+    - echo "🐦 Running Flutter unit tests..."
+    - flutter test --coverage \
+      --coverage-json=flutter-unit-coverage.json \
+      --coverage-html=flutter-unit-coverage.html \
+      --reporter=json \
+      --reporter=html \
+      --junit-report=flutter-unit-test-results.xml
+    
+    # Run integration tests
+    - echo "🔗 Running integration tests..."
+    - pytest tests/integration/ \
+      --junitxml=python-integration-test-results.xml \
+      --html=python-integration-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Start API server for integration tests
+    - echo "🚀 Starting API server for integration tests..."
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run API integration tests
+    - echo "🔌 Running API integration tests..."
+    - pytest tests/api/integration/ \
+      --junitxml=api-integration-test-results.xml \
+      --html=api-integration-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Build web application for E2E tests
+    - echo "🌐 Building web application for E2E tests..."
+    - flutter build web --release
+    
+    # Start web server
+    - cd build/web && python -m http.server 8080 &
+    - sleep 5
+    
+    # Run Cypress E2E tests
+    - echo "🌐 Running Cypress E2E tests..."
+    - npx cypress run \
+      --browser chrome \
+      --headless \
+      --reporter junit \
+      --reporter-options mochaFile=cypress-e2e-test-results.xml
+    
+    # Run performance tests
+    - echo "⚡ Running performance tests..."
+    - locust -f tests/performance/locustfile.py \
+      --headless \
+      --users 100 \
+      --spawn-rate 10 \
+      --run-time 60s \
+      --host http://localhost:8000 \
+      --html locust-performance-report.html \
+      --csv locust-performance-results.csv
+    
+    - npx lighthouse http://localhost:8080 \
+      --output=json \
+      --output-path=lighthouse-performance-report.json \
+      --chrome-flags="--headless"
+    
+    # Run security tests
+    - echo "🔒 Running security tests..."
+    - docker run -t owasp/zap2docker-stable zap-baseline.py \
+      -t http://localhost:8000 \
+      -J zap-security-report.json \
+      -I zap-security-report.html
+    
+    - pytest tests/security/ \
+      --junitxml=security-test-results.xml \
+      --html=security-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Run accessibility tests
+    - echo "♿ Running accessibility tests..."
+    - npm run test:accessibility \
+      -- --reporter=json \
+      --outputFile=axe-accessibility-report.json
+    
+    - npx lighthouse http://localhost:8080 \
+      --output=json \
+      --output-path=lighthouse-accessibility-report.json \
+      --chrome-flags="--headless" \
+      --only-categories=accessibility
+    
+    # Run localization tests
+    - echo "🌍 Running localization tests..."
+    - flutter test test/localization/ \
+      --reporter=json \
+      --reporter=html \
+      --junit-report=flutter-localization-test-results.xml
+    
+    - npm run test:i18n \
+      -- --reporter=json \
+      --outputFile=i18n-test-results.json
+    
+    # Generate comprehensive test report
+    - echo "📊 Generating comprehensive test report..."
+    - python scripts/generate_comprehensive_test_report.py \
+      --unit-results python-unit-test-results.xml \
+      --integration-results python-integration-test-results.xml \
+      --api-results api-integration-test-results.xml \
+      --e2e-results cypress-e2e-test-results.xml \
+      --performance-results locust-performance-results.csv \
+      --security-results security-test-results.xml \
+      --accessibility-results axe-accessibility-report.json \
+      --localization-results flutter-localization-test-results.xml \
+      --output comprehensive-test-report.json
+    
+    # Generate test coverage report
+    - echo "📈 Generating test coverage report..."
+    - python scripts/generate_test_coverage_report.py \
+      --python-coverage coverage.json \
+      --flutter-coverage flutter-unit-coverage.json \
+      --javascript-coverage coverage/coverage-final.json \
+      --output test-coverage-report.json
+  artifacts:
+    reports:
+      junit: comprehensive-test-report.json
+    paths:
+      - python-unit-test-results.xml
+      - javascript-unit-test-results.xml
+      - flutter-unit-test-results.xml
+      - python-integration-test-results.xml
+      - api-integration-test-results.xml
+      - cypress-e2e-test-results.xml
+      - locust-performance-report.html
+      - locust-performance-results.csv
+      - lighthouse-performance-report.json
+      - zap-security-report.json
+      - zap-security-report.html
+      - security-test-results.xml
+      - axe-accessibility-report.json
+      - lighthouse-accessibility-report.json
+      - flutter-localization-test-results.xml
+      - i18n-test-results.json
+      - comprehensive-test-report.json
+      - test-coverage-report.json
+      - coverage.json
+      - coverage.html
+      - flutter-unit-coverage.json
+      - flutter-unit-coverage.html
+      - python-unit-test-report.html
+      - python-integration-test-report.html
+      - api-integration-test-report.html
+      - security-test-report.html
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Russian Cloud Integration Testing Pipeline
+russian-cloud-integration-testing:
+  stage: test
+  image: python:3.11
+  before_script:
+    - pip install pytest pytest-asyncio
+    - pip install httpx aiohttp
+    - pip install -r requirements.txt
+  script:
+    - echo "☁️ Starting Russian Cloud integration testing..."
+    
+    # Test Yandex Cloud integration
+    - echo "🇷🇺 Testing Yandex Cloud integration..."
+    - pytest tests/integration/yandex_cloud/ \
+      --junitxml=yandex-cloud-integration-results.xml \
+      --html=yandex-cloud-integration-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Test VK Cloud integration
+    - echo "☁️ Testing VK Cloud integration..."
+    - pytest tests/integration/vk_cloud/ \
+      --junitxml=vk-cloud-integration-results.xml \
+      --html=vk-cloud-integration-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Test Selectel integration
+    - echo "☁️ Testing Selectel integration..."
+    - pytest tests/integration/selectel/ \
+      --junitxml=selectel-integration-results.xml \
+      --html=selectel-integration-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Test multi-cloud orchestration
+    - echo "🎼 Testing multi-cloud orchestration..."
+    - pytest tests/integration/multi_cloud/ \
+      --junitxml=multi-cloud-integration-results.xml \
+      --html=multi-cloud-integration-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Test Russian data residency
+    - echo "🏛️ Testing Russian data residency compliance..."
+    - pytest tests/compliance/russian_data_residency/ \
+      --junitxml=russian-data-residency-results.xml \
+      --html=russian-data-residency-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Generate Russian cloud integration report
+    - echo "📊 Generating Russian cloud integration report..."
+    - python scripts/generate_russian_cloud_integration_report.py \
+      --yandex-results yandex-cloud-integration-results.xml \
+      --vk-results vk-cloud-integration-results.xml \
+      --selectel-results selectel-integration-results.xml \
+      --multi-cloud-results multi-cloud-integration-results.xml \
+      --data-residency-results russian-data-residency-results.xml \
+      --output russian-cloud-integration-report.json
+  artifacts:
+    reports:
+      junit: russian-cloud-integration-report.json
+    paths:
+      - yandex-cloud-integration-results.xml
+      - yandex-cloud-integration-report.html
+      - vk-cloud-integration-results.xml
+      - vk-cloud-integration-report.html
+      - selectel-integration-results.xml
+      - selectel-integration-report.html
+      - multi-cloud-integration-results.xml
+      - multi-cloud-integration-report.html
+      - russian-data-residency-results.xml
+      - russian-data-residency-report.html
+      - russian-cloud-integration-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Performance and Load Testing Pipeline
+performance-load-testing:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install locust pytest pytest-asyncio
+    - pip install httpx aiohttp
+    - pip install -r requirements.txt
+    - npm install -g lighthouse
+  script:
+    - echo "⚡ Starting performance and load testing..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Setup test environment
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    
+    # Start application
+    - echo "🚀 Starting application for performance testing..."
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Build web application
+    - echo "🌐 Building web application for performance testing..."
+    - flutter build web --release
+    
+    # Start web server
+    - cd build/web && python -m http.server 8080 &
+    - sleep 5
+    
+    # Run API load testing
+    - echo "🔌 Running API load testing..."
+    - locust -f tests/performance/api/locustfile.py \
+      --headless \
+      --users 500 \
+      --spawn-rate 50 \
+      --run-time 300s \
+      --host http://localhost:8000 \
+      --html api-load-test-report.html \
+      --csv api-load-test-results.csv
+    
+    # Run web performance testing
+    - echo "🌐 Running web performance testing..."
+    - npx lighthouse http://localhost:8080 \
+      --output=json \
+      --output-path=web-performance-report.json \
+      --chrome-flags="--headless"
+    
+    # Run database performance testing
+    - echo "🗄️ Running database performance testing..."
+    - pytest tests/performance/database/ \
+      --junitxml=database-performance-results.xml \
+      --html=database-performance-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Run mobile performance testing
+    - echo "📱 Running mobile performance testing..."
+    - flutter test integration_test/performance/ \
+      --reporter=json \
+      --reporter=html \
+      --junit-report=mobile-performance-results.xml
+    
+    # Generate performance report
+    - echo "📊 Generating performance report..."
+    - python scripts/generate_performance_report.py \
+      --api-results api-load-test-results.csv \
+      --web-results web-performance-report.json \
+      --database-results database-performance-results.xml \
+      --mobile-results mobile-performance-results.xml \
+      --output comprehensive-performance-report.json
+  artifacts:
+    reports:
+      junit: comprehensive-performance-report.json
+    paths:
+      - api-load-test-report.html
+      - api-load-test-results.csv
+      - web-performance-report.json
+      - database-performance-results.xml
+      - database-performance-report.html
+      - mobile-performance-results.xml
+      - comprehensive-performance-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Security and Compliance Testing Pipeline
+security-compliance-testing:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7
+  variables:
+    POSTGRES_DB: space_invaders_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/space_invaders_test"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - pip install pytest pytest-asyncio
+    - pip install httpx aiohttp
+    - pip install -r requirements.txt
+  script:
+    - echo "🔒 Starting security and compliance testing..."
+    
+    # Wait for services
+    - until pg_isready -h postgres -p 5432 -U postgres; do
+        echo "Waiting for PostgreSQL..."
+        sleep 2
+      done
+    - until redis-cli -h redis ping; do
+        echo "Waiting for Redis..."
+        sleep 2
+      done
+    
+    # Setup test environment
+    - export DATABASE_URL=$DATABASE_URL
+    - export REDIS_URL=$REDIS_URL
+    
+    # Start application
+    - echo "🚀 Starting application for security testing..."
+    - uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+    - sleep 10
+    
+    # Run OWASP ZAP security scan
+    - echo "🛡️ Running OWASP ZAP security scan..."
+    - docker run -t owasp/zap2docker-stable zap-baseline.py \
+      -t http://localhost:8000 \
+      -J zap-security-report.json \
+      -I zap-security-report.html
+    
+    # Run security tests
+    - echo "🔒 Running security tests..."
+    - pytest tests/security/ \
+      --junitxml=security-test-results.xml \
+      --html=security-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Run penetration tests
+    - echo "💥 Running penetration tests..."
+    - pytest tests/penetration/ \
+      --junitxml=penetration-test-results.xml \
+      --html=penetration-test-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Run compliance tests
+    - echo "🏛️ Running compliance tests..."
+    - pytest tests/compliance/gdpr/ \
+      --junitxml=gdpr-compliance-results.xml \
+      --html=gdpr-compliance-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    - pytest tests/compliance/russian_law/ \
+      --junitxml=russian-compliance-results.xml \
+      --html=russian-compliance-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    - pytest tests/compliance/pci_dss/ \
+      --junitxml=pci-dss-compliance-results.xml \
+      --html=pci-dss-compliance-report.html \
+      --self-contained-html \
+      --tb=short \
+      -v
+    
+    # Generate security and compliance report
+    - echo "📊 Generating security and compliance report..."
+    - python scripts/generate_security_compliance_report.py \
+      --zap-results zap-security-report.json \
+      --security-results security-test-results.xml \
+      --penetration-results penetration-test-results.xml \
+      --gdpr-results gdpr-compliance-results.xml \
+      --russian-results russian-compliance-results.xml \
+      --pci-dss-results pci-dss-compliance-results.xml \
+      --output security-compliance-report.json
+  artifacts:
+    reports:
+      junit: security-compliance-report.json
+    paths:
+      - zap-security-report.json
+      - zap-security-report.html
+      - security-test-results.xml
+      - security-test-report.html
+      - penetration-test-results.xml
+      - penetration-test-report.html
+      - gdpr-compliance-results.xml
+      - gdpr-compliance-report.html
+      - russian-compliance-results.xml
+      - russian-compliance-report.html
+      - pci-dss-compliance-results.xml
+      - pci-dss-compliance-report.html
+      - security-compliance-report.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"

@@ -1,0 +1,772 @@
+# Bitbucket Pipelines Templates for Space Invaders Enhanced Edition
+
+# Advanced Security Pipeline
+pipelines:
+  custom:
+    security-scan:
+      - step:
+          name: 'Security Vulnerability Scan'
+          image: owasp/zap2docker-stable
+          script:
+            - mkdir -p /zap/wrk/
+            - /zap/zap-baseline.py -t build/web/ -J gl-sast-report.json || true
+          artifacts:
+            reports:
+              sast: gl-sast-report.json
+            paths:
+              - gl-sast-report.json
+          services:
+            - docker
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security scan completed'
+
+    dependency-scan:
+      - step:
+          name: 'Dependency Vulnerability Scan'
+          image: python:3.9
+          script:
+            - pip install safety
+            - safety check --json --output safety-report.json
+            - pip install bandit
+            - bandit -r lib/ -f json -o bandit-report.json
+          artifacts:
+            reports:
+              dependency_scanning: safety-report.json
+            paths:
+              - safety-report.json
+              - bandit-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Dependency scan completed'
+
+    container-scan:
+      - step:
+          name: 'Container Security Scan'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker build -t space-invaders:latest .
+            - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/reports aquasec/trivy:latest image --format json --output /reports/container-report.json space-invaders:latest
+          artifacts:
+            reports:
+              container_scanning: container-report.json
+            paths:
+              - container-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Container scan completed'
+
+    code-quality:
+      - step:
+          name: 'Code Quality Analysis'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter analyze --no-fatal-infos --no-fatal-warnings > flutter-analyze.txt || true
+            - flutter analyze --fatal-infos --fatal-warnings
+            - dart format --set-exit-if-changed .
+          artifacts:
+            paths:
+              - flutter-analyze.txt
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Code quality analysis completed'
+
+    performance-test:
+      - step:
+          name: 'Performance Testing'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter build web --web-renderer canvaskit --release --profile
+            - python3 scripts/performance_analyzer.py build/web/ --output performance-report.json
+          artifacts:
+            paths:
+              - performance-report.json
+              - performance-report.html
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Performance testing completed'
+
+    accessibility-test:
+      - step:
+          name: 'Accessibility Testing'
+          image: node:18
+          script:
+            - npm install -g @axe-core/cli pa11y lighthouse
+            - flutter build web --web-renderer canvaskit --release
+            - axe build/web/ --tags wcag2a,wcag2aa,wcag21aa --exit
+            - pa11y build/web/ --standard WCAG2AA --reporter json --reporter html
+            - lighthouse build/web/ --chrome-flags="--headless" --output=json --output=html --only-categories=accessibility
+          artifacts:
+            paths:
+              - accessibility-report.json
+              - accessibility-report.html
+              - lighthouse-accessibility.json
+              - lighthouse-accessibility.html
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Accessibility testing completed'
+
+    localization-test:
+      - step:
+          name: 'Localization Testing'
+          image: node:18
+          script:
+            - npm install -g i18next-scanner gettext
+            - i18next-scanner 'lib/**/*.dart' --output locales/en/
+            - python3 scripts/localization_checker.py locales/
+            - flutter test integration_test/localization_test.dart
+          artifacts:
+            paths:
+              - localization-report.json
+              - missing-translations.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Localization testing completed'
+
+    load-test:
+      - step:
+          name: 'Load Testing'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker-compose -f docker-compose.test.yml up -d
+            - sleep 30
+            - docker run --rm --network host -v $(pwd):/tests grafana/k6:latest run /tests/load-test.js
+            - docker-compose -f docker-compose.test.yml down
+          artifacts:
+            paths:
+              - load-test-report.json
+              - load-test-report.html
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Load testing completed'
+
+    multi-platform-build:
+      - parallel:
+          - step:
+              name: 'Web Build'
+              image: cirrusci/flutter:3.16.0
+              caches:
+                - flutter
+              script:
+                - flutter channel stable
+                - flutter upgrade
+                - flutter pub get
+                - flutter build web --web-renderer canvaskit --release
+              artifacts:
+                - build/web/**
+              after-script:
+                - pipe: atlassian/slack-notify:0.3.0
+                  variables:
+                    WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                    MESSAGE: 'Web build completed'
+
+          - step:
+              name: 'Android Build'
+              image: cirrusci/flutter:3.16.0
+              caches:
+                - flutter
+                - gradle
+              script:
+                - flutter channel stable
+                - flutter upgrade
+                - flutter pub get
+                - flutter build apk --release
+                - flutter build appbundle --release
+              artifacts:
+                - build/app/outputs/flutter-apk/**
+                - build/app/outputs/bundle/**
+              after-script:
+                - pipe: atlassian/slack-notify:0.3.0
+                  variables:
+                    WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                    MESSAGE: 'Android build completed'
+
+          - step:
+              name: 'Windows Build'
+              image: cirrusci/flutter:3.16.0
+              caches:
+                - flutter
+              script:
+                - flutter channel stable
+                - flutter upgrade
+                - flutter pub get
+                - flutter config --enable-windows-desktop
+                - flutter build windows --release
+              artifacts:
+                - build/windows/runner/Release/**
+              after-script:
+                - pipe: atlassian/slack-notify:0.3.0
+                  variables:
+                    WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                    MESSAGE: 'Windows build completed'
+
+          - step:
+              name: 'iOS Build'
+              image: macos-latest
+              caches:
+                - flutter
+              script:
+                - flutter channel stable
+                - flutter upgrade
+                - flutter pub get
+                - flutter build ios --release
+              artifacts:
+                - build/ios/iphoneos/Runner.app
+              after-script:
+                - pipe: atlassian/slack-notify:0.3.0
+                  variables:
+                    WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                    MESSAGE: 'iOS build completed'
+
+    integration-test:
+      - step:
+          name: 'Integration Testing'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter build web --web-renderer canvaskit --release
+            - cd build/web
+            - python3 -m http.server 8080 &
+            - sleep 5
+            - cd ../..
+            - flutter drive --driver=test_driver/integration_test.dart --target=integration_test/app_test.dart --web-port=8080
+          artifacts:
+            paths:
+              - integration-test-results.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Integration testing completed'
+
+    chaos-engineering:
+      - step:
+          name: 'Chaos Engineering'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker-compose -f docker-compose.chaos.yml up -d
+            - sleep 30
+            - docker run --rm --network host chaosmesh/chaos-mesh:latest network chaos --target-container app --latency --duration 60s
+            - docker run --rm --network host chaosmesh/chaos-mesh:latest pod chaos --target-container app --kill --duration 60s
+            - docker-compose -f docker-compose.chaos.yml down
+          artifacts:
+            paths:
+              - chaos-report.json
+              - chaos-report.html
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Chaos engineering completed'
+
+    compliance-audit:
+      - step:
+          name: 'Compliance Audit'
+          image: alpine:latest
+          script:
+            - apk add --no-cache curl jq
+            - curl -sSL https://raw.githubusercontent.com/gdpr-compliance-checker/gdpr-checker/main/check.sh | sh
+            - curl -sSL https://raw.githubusercontent.com/pci-dss-checker/pci-checker/main/check.sh | sh
+            - python3 scripts/compliance_report_generator.py
+          artifacts:
+            paths:
+              - gdpr-report.json
+              - pci-dss-report.json
+              - compliance-summary.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Compliance audit completed'
+
+    backup-test:
+      - step:
+          name: 'Backup and Recovery Test'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker run --rm -v $(pwd):/data alpine:latest sh -c "echo 'test data' > /data/test-file.txt"
+            - docker run --rm -v $(pwd):/backup alpine:latest tar -czf /backup/test-backup.tar.gz test-file.txt
+            - rm test-file.txt
+            - docker run --rm -v $(pwd):/data alpine:latest tar -xzf /backup/test-backup.tar.gz -C /data/
+            - if [ ! -f test-file.txt ]; then exit 1; fi
+            - python3 scripts/backup_report_generator.py
+          artifacts:
+            paths:
+              - backup-report.json
+              - test-backup.tar.gz
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Backup and recovery test completed'
+
+    disaster-recovery:
+      - step:
+          name: 'Disaster Recovery Test'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker-compose -f docker-compose.primary.yml up -d
+            - sleep 30
+            - docker-compose -f docker-compose.primary.yml down
+            - docker-compose -f docker-compose.backup.yml up -d
+            - sleep 30
+            - curl -f http://localhost:8080/health || exit 1
+            - python3 scripts/data_consistency_checker.py
+            - python3 scripts/recovery_time_analyzer.py
+            - docker-compose -f docker-compose.backup.yml down
+            - python3 scripts/disaster_recovery_report_generator.py
+          artifacts:
+            paths:
+              - dr-report.json
+              - recovery-time-metrics.json
+              - data-consistency-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Disaster recovery test completed'
+
+    documentation-test:
+      - step:
+          name: 'Documentation Testing'
+          image: node:18
+          script:
+            - npm install -g markdownlint-cli markdown-link-check
+            - markdownlint **/*.md
+            - find . -name "*.md" -exec markdown-link-check {} \;
+            - python3 scripts/api_doc_validator.py docs/api/
+            - dart doc --report=lib/ > doc-coverage.json
+            - python3 scripts/doc_accessibility_checker.py docs/
+          artifacts:
+            paths:
+              - documentation-report.json
+              - doc-coverage.json
+              - link-check-report.json
+              - doc-accessibility-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Documentation testing completed'
+
+    data-privacy:
+      - step:
+          name: 'Data Privacy Check'
+          image: python:3.9
+          script:
+            - pip install pandas numpy cryptography
+            - python3 scripts/pii_detector.py --directory lib/ --output pii-report.json
+            - python3 scripts/encryption_checker.py --directory lib/ --output encryption-report.json
+            - python3 scripts/retention_checker.py --directory lib/ --output retention-report.json
+            - python3 scripts/consent_checker.py --directory lib/ --output consent-report.json
+            - python3 scripts/privacy_report_generator.py
+          artifacts:
+            paths:
+              - pii-report.json
+              - encryption-report.json
+              - retention-report.json
+              - consent-report.json
+              - privacy-summary.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Data privacy check completed'
+
+    full-suite:
+      - step:
+          name: 'Full Test Suite'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+            - gradle
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter analyze --fatal-infos --fatal-warnings
+            - flutter test --coverage
+            - flutter build web --web-renderer canvaskit --release
+            - flutter build apk --release
+            - flutter build appbundle --release
+            - flutter config --enable-windows-desktop
+            - flutter build windows --release
+          artifacts:
+            paths:
+              - build/web/**
+              - build/app/outputs/flutter-apk/**
+              - build/app/outputs/bundle/**
+              - build/windows/runner/Release/**
+              - coverage/**
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Full test suite completed'
+
+    security-compliance:
+      - step:
+          name: 'Security and Compliance Suite'
+          image: docker:latest
+          services:
+            - docker:dind
+          script:
+            - docker build -t space-invaders:latest .
+            - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/reports aquasec/trivy:latest image --format json --output /reports/container-report.json space-invaders:latest
+            - docker run --rm -v $(pwd):/app owasp/dependency-check:latest --project SpaceInvaders --scan /app
+            - docker run --rm -v $(pwd):/app securecodewarrior/docker-sast:latest /app
+            - python3 scripts/compliance_report_generator.py
+          artifacts:
+            paths:
+              - container-report.json
+              - dependency-check-report.html
+              - sast-report.json
+              - compliance-summary.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security and compliance suite completed'
+
+# Branch-specific pipelines
+  branches:
+    main:
+      - step:
+          name: 'Production Build and Test'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+            - gradle
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter analyze --fatal-infos --fatal-warnings
+            - flutter test --coverage
+            - flutter build web --web-renderer canvaskit --release
+            - flutter build apk --release
+            - flutter build appbundle --release
+            - flutter config --enable-windows-desktop
+            - flutter build windows --release
+          artifacts:
+            paths:
+              - build/web/**
+              - build/app/outputs/flutter-apk/**
+              - build/app/outputs/bundle/**
+              - build/windows/runner/Release/**
+              - coverage/**
+          services:
+            - docker
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Production build completed for $BITBUCKET_COMMIT'
+
+      - step:
+          name: 'Security Scan'
+          image: owasp/zap2docker-stable
+          script:
+            - mkdir -p /zap/wrk/
+            - /zap/zap-baseline.py -t build/web/ -J gl-sast-report.json || true
+          artifacts:
+            reports:
+              sast: gl-sast-report.json
+            paths:
+              - gl-sast-report.json
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Security scan completed for $BITBUCKET_COMMIT'
+
+      - step:
+          name: 'Deploy to Production'
+          image: alpine:latest
+          deployment: production
+          script:
+            - echo "Deploying to production environment"
+            - apk add --no-cache curl
+            - curl -X POST "$PRODUCTION_DEPLOY_URL" -H "Authorization: Bearer $DEPLOY_TOKEN"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Deployed to production: $BITBUCKET_COMMIT'
+
+    develop:
+      - step:
+          name: 'Development Build and Test'
+          image: cirrusci/flutter:3.16.0
+          caches:
+            - flutter
+            - gradle
+          script:
+            - flutter channel stable
+            - flutter upgrade
+            - flutter pub get
+            - flutter analyze --fatal-infos --fatal-warnings
+            - flutter test --coverage
+            - flutter build web --web-renderer canvaskit --release
+            - flutter build apk --release
+          artifacts:
+            paths:
+              - build/web/**
+              - build/app/outputs/flutter-apk/**
+              - coverage/**
+          services:
+            - docker
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Development build completed for $BITBUCKET_COMMIT'
+
+      - step:
+          name: 'Deploy to Staging'
+          image: alpine:latest
+          deployment: staging
+          script:
+            - echo "Deploying to staging environment"
+            - apk add --no-cache curl
+            - curl -X POST "$STAGING_DEPLOY_URL" -H "Authorization: Bearer $DEPLOY_TOKEN"
+          after-script:
+            - pipe: atlassian/slack-notify:0.3.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK_URL
+                MESSAGE: 'Deployed to staging: $BITBUCKET_COMMIT'
+
+# Pull request pipelines
+  pull-requests:
+    - step:
+        name: 'PR Build and Test'
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+          - gradle
+        script:
+          - flutter channel stable
+          - flutter upgrade
+          - flutter pub get
+          - flutter analyze --fatal-infos --fatal-warnings
+          - flutter test --coverage
+          - flutter build web --web-renderer canvaskit --release
+        artifacts:
+          paths:
+            - build/web/**
+            - coverage/**
+        services:
+          - docker
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'PR build completed for $BITBUCKET_PR_ID'
+
+    - step:
+        name: 'Security Scan'
+        image: owasp/zap2docker-stable
+        script:
+          - mkdir -p /zap/wrk/
+          - /zap/zap-baseline.py -t build/web/ -J gl-sast-report.json || true
+        artifacts:
+          reports:
+            sast: gl-sast-report.json
+          paths:
+            - gl-sast-report.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Security scan completed for $BITBUCKET_PR_ID'
+
+    - step:
+        name: 'Code Quality Check'
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+        script:
+          - flutter channel stable
+          - flutter upgrade
+          - flutter pub get
+          - flutter analyze --fatal-infos --fatal-warnings
+          - dart format --set-exit-if-changed .
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Code quality check completed for $BITBUCKET_PR_ID'
+
+# Scheduled pipelines
+  schedules:
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM
+      step:
+        name: 'Weekly Security and Compliance Scan'
+        image: docker:latest
+        services:
+          - docker:dind
+        script:
+          - docker build -t space-invaders:latest .
+          - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $PWD:/reports aquasec/trivy:latest image --format json --output /reports/container-report.json space-invaders:latest
+          - docker run --rm -v $(pwd):/app owasp/dependency-check:latest --project SpaceInvaders --scan /app
+          - python3 scripts/compliance_report_generator.py
+        artifacts:
+          paths:
+            - container-report.json
+            - dependency-check-report.html
+            - compliance-summary.json
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Weekly security and compliance scan completed'
+
+    - cron: '0 6 * * *'  # Daily at 6 AM
+      step:
+        name: 'Daily Performance Test'
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+        script:
+          - flutter channel stable
+          - flutter upgrade
+          - flutter pub get
+          - flutter build web --web-renderer canvaskit --release --profile
+          - python3 scripts/performance_analyzer.py build/web/ --output performance-report.json
+        artifacts:
+          paths:
+            - performance-report.json
+            - performance-report.html
+        after-script:
+          - pipe: atlassian/slack-notify:0.3.0
+            variables:
+              WEBHOOK_URL: $SLACK_WEBHOOK_URL
+              MESSAGE: 'Daily performance test completed'
+
+# Definitions for reusable steps and scripts
+definitions:
+  caches:
+    flutter:
+      key: flutter-$BITBUCKET_COMMIT
+      paths:
+        - .flutter/
+        - .pub-cache/
+    gradle:
+      key: gradle-$BITBUCKET_COMMIT
+      paths:
+        - android/.gradle/
+        - android/.gradle/wrapper/
+        - android/gradlew
+        - android/gradlew.bat
+
+  services:
+    docker:
+      image: docker:20.10.16
+
+  scripts:
+    - &setup-flutter |
+      flutter channel stable
+      flutter upgrade
+      flutter pub get
+    - &build-web |
+      flutter build web --web-renderer canvaskit --release
+    - &build-android |
+      flutter build apk --release
+      flutter build appbundle --release
+    - &test-flutter |
+      flutter analyze --fatal-infos --fatal-warnings
+      flutter test --coverage
+    - &notify-slack |
+      pipe: atlassian/slack-notify:0.3.0
+        variables:
+          WEBHOOK_URL: $SLACK_WEBHOOK_URL
+          MESSAGE: '$BITBUCKET_PIPELINE_STATE: $BITBUCKET_COMMIT'
+
+  steps:
+    - step: &security-scan
+        name: 'Security Scan'
+        image: owasp/zap2docker-stable
+        script:
+          - mkdir -p /zap/wrk/
+          - /zap/zap-baseline.py -t build/web/ -J gl-sast-report.json || true
+        artifacts:
+          reports:
+            sast: gl-sast-report.json
+          paths:
+            - gl-sast-report.json
+        after-script:
+          - *notify-slack
+
+    - step: &performance-test
+        name: 'Performance Test'
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+        script:
+          - *setup-flutter
+          - *build-web
+          - python3 scripts/performance_analyzer.py build/web/ --output performance-report.json
+        artifacts:
+          paths:
+            - performance-report.json
+            - performance-report.html
+        after-script:
+          - *notify-slack
+
+    - step: &accessibility-test
+        name: 'Accessibility Test'
+        image: node:18
+        script:
+          - npm install -g @axe-core/cli pa11y lighthouse
+          - *build-web
+          - axe build/web/ --tags wcag2a,wcag2aa,wcag21aa --exit
+          - pa11y build/web/ --standard WCAG2AA --reporter json --reporter html
+          - lighthouse build/web/ --chrome-flags="--headless" --output=json --output=html --only-categories=accessibility
+        artifacts:
+          paths:
+            - accessibility-report.json
+            - accessibility-report.html
+            - lighthouse-accessibility.json
+            - lighthouse-accessibility.html
+        after-script:
+          - *notify-slack

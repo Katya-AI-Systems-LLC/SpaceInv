@@ -1,0 +1,163 @@
+version: 2.1
+
+orbs:
+  flutter: circleci/flutter@2.0.0
+
+executors:
+  flutter-executor:
+    docker:
+      - image: cimg/flutter:3.16.0
+    working_directory: ~/project
+
+jobs:
+  test:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Run Flutter tests
+          command: flutter test --coverage
+      - run:
+          name: Generate coverage report
+          command: |
+            sudo apt-get install -y lcov
+            genhtml coverage/lcov.info -o coverage/html
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: coverage/html
+          destination: coverage
+
+  analyze:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Run Flutter analyze
+          command: flutter analyze
+      - run:
+          name: Check code formatting
+          command: dart format --set-exit-if-changed .
+
+  build_web:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Build web version
+          command: flutter build web --web-renderer canvaskit --release
+      - store_artifacts:
+          path: build/web
+          destination: web-build
+
+  build_android:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Build Android APK
+          command: flutter build apk --release
+      - store_artifacts:
+          path: build/app/outputs/flutter-apk
+          destination: android-apk
+
+  build_ios:
+    macos:
+      xcode: 15.0.0
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Build iOS version
+          command: flutter build ios --release --no-codesign
+      - store_artifacts:
+          path: build/ios/iphoneos
+          destination: ios-build
+
+  deploy_staging:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Build web for staging
+          command: flutter build web --web-renderer canvaskit --release
+      - run:
+          name: Deploy to staging
+          command: |
+            echo "Deploying to staging environment"
+            # Add your staging deployment script here
+
+  deploy_production:
+    executor: flutter-executor
+    steps:
+      - checkout
+      - flutter/install_deps:
+          cache-version: v1
+      - run:
+          name: Build web for production
+          command: flutter build web --web-renderer canvaskit --release
+      - run:
+          name: Deploy to production
+          command: |
+            echo "Deploying to production environment"
+            # Add your production deployment script here
+
+workflows:
+  version: 2
+  test_and_build:
+    jobs:
+      - test
+      - analyze
+      - build_web:
+          requires:
+            - test
+            - analyze
+      - build_android:
+          requires:
+            - test
+            - analyze
+      - build_ios:
+          requires:
+            - test
+            - analyze
+
+  deploy_staging:
+    jobs:
+      - test
+      - analyze
+      - build_web:
+          requires:
+            - test
+            - analyze
+      - deploy_staging:
+          requires:
+            - build_web
+          filters:
+            branches:
+              only: develop
+
+  deploy_production:
+    jobs:
+      - test
+      - analyze
+      - build_web:
+          requires:
+            - test
+            - analyze
+      - deploy_production:
+          requires:
+            - build_web
+          filters:
+            branches:
+              only: main

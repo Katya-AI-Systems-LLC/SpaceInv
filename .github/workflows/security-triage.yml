@@ -1,0 +1,94 @@
+# GitHub Workflow Templates for Space Invaders Enhanced Edition
+
+name: Security Vulnerability Response
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  security-triage:
+    if: contains(github.event.label.name, 'security')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage Security Issue
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Add security label and assign to security team
+            github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['security', 'triage']
+            });
+            
+            // Assign to security team
+            github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: ['security-lead', 'security-engineer']
+            });
+            
+            // Create security advisory
+            github.rest.advisories.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              summary: context.issue.title,
+              description: context.issue.body,
+              severity: 'high',
+              cve_id: null,
+              credits: [],
+              vulnerabilities: []
+            });
+
+  security-notification:
+    if: contains(github.event.label.name, 'security')
+    needs: security-triage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Security Team
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Send notification to security team
+            const webhookUrl = process.env.SECURITY_WEBHOOK_URL;
+            if (webhookUrl) {
+              await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  text: `🔒 Security Issue Reported: ${context.issue.title}`,
+                  attachments: [{
+                    color: 'danger',
+                    fields: [{
+                      title: 'Issue',
+                      value: `#${context.issue.number}`,
+                      short: true
+                    }, {
+                      title: 'Reporter',
+                      value: context.issue.user.login,
+                      short: true
+                    }, {
+                      title: 'Severity',
+                      value: 'High',
+                      short: true
+                    }]
+                  }]
+                })
+              });
+            }
+
+      - name: Create Security Task
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // Create task in project board
+            github.rest.projects.createCard({
+              project_id: 'PROJECT_ID',
+              column_id: 'COLUMN_ID',
+              content_id: context.issue.node_id,
+              content_type: 'Issue'
+            });
