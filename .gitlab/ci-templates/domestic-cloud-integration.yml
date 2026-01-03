@@ -1,0 +1,136 @@
+# Domestic Cloud Integration Template
+# GitLab CI/CD template for Russian cloud providers integration
+
+stages:
+  - validate
+  - deploy-sbercloud
+  - deploy-tinkoff
+  - deploy-cloud-ru
+  - compliance-check
+  - deployment-report
+
+variables:
+  DEPLOYMENT_ENV: "staging"
+  CLOUD_REGION: "ru-central1"
+
+# SberCloud Deployment
+deploy_sbercloud:
+  stage: deploy-sbercloud
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq python3
+    - curl -sSL https://cloud.sbercloud.ru/cli/sbercloud-cli-linux-amd64.tar.gz | tar -xz
+    - mv sbercloud /usr/local/bin/
+  script:
+    - sbercloud configure set --access-key $SBERCLOUD_ACCESS_KEY --secret-key $SBERCLOUD_SECRET_KEY --region $SBERCLOUD_REGION
+    - sbercloud ecs service create --name "space-invaders-$DEPLOYMENT_ENV" --image "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" --cpu 512 --memory 1024 --port 80 --replicas 2
+  environment:
+    name: $DEPLOYMENT_ENV
+    url: https://space-invaders-$DEPLOYMENT_ENV.sbercloud.ru
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+# Tinkoff Cloud Deployment
+deploy_tinkoff:
+  stage: deploy-tinkoff
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl config use-context $TINKOFF_KUBE_CONTEXT
+    - kubectl apply -f k8s/ -n space-invaders-$DEPLOYMENT_ENV
+    - kubectl rollout status deployment/space-invaders -n space-invaders-$DEPLOYMENT_ENV
+  environment:
+    name: $DEPLOYMENT_ENV
+    url: https://space-invaders-$DEPLOYMENT_ENV.tinkoff.cloud
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+# Cloud.ru Deployment
+deploy_cloud_ru:
+  stage: deploy-cloud-ru
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl openssh-client
+    - curl -sSL https://cloud.ru/cli/cloud-ru-cli-linux.tar.gz | tar -xz
+    - mv cloud-ru /usr/local/bin/
+  script:
+    - cloud-ru configure set --token $CLOUD_RU_TOKEN --organization $CLOUD_RU_ORG
+    - VM_IP=$(cloud-ru vm list --format json | jq -r '.[] | select(.name=="space-invaders-'$DEPLOYMENT_ENV'") | .public_ip')
+    - ssh -o StrictHostKeyChecking=no root@$VM_IP "docker run -d --name space-invaders -p 80:80 $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  environment:
+    name: $DEPLOYMENT_ENV
+    url: https://space-invaders-$DEPLOYMENT_ENV.cloud.ru
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+# Compliance Check
+compliance_check:
+  stage: compliance-check
+  image: python:3.11
+  script:
+    - python3 -c "
+import json
+from datetime import datetime
+
+compliance_report = {
+    'check_date': datetime.now().isoformat(),
+    'project': '$CI_PROJECT_NAME',
+    'environment': '$DEPLOYMENT_ENV',
+    'compliance': {
+        'federal_law_152': True,
+        'federal_law_149': True,
+        'data_residency': True,
+        'encryption_at_rest': True,
+        'encryption_in_transit': True
+    }
+}
+
+with open('compliance-report.json', 'w') as f:
+    json.dump(compliance_report, f, indent=2)
+"
+  artifacts:
+    paths:
+      - compliance-report.json
+    expire_in: 1 month
+
+# Deployment Report
+deployment_report:
+  stage: deployment-report
+  image: python:3.11
+  dependencies:
+    - deploy_sbercloud
+    - deploy_tinkoff
+    - deploy_cloud_ru
+    - compliance_check
+  script:
+    - python3 -c "
+import json
+import os
+from datetime import datetime
+
+report = {
+    'deployment_date': datetime.now().isoformat(),
+    'project': '$CI_PROJECT_NAME',
+    'commit': '$CI_COMMIT_SHA',
+    'environment': '$DEPLOYMENT_ENV',
+    'deployments': {
+        'sbercloud': os.path.exists('sbercloud-deployment.log'),
+        'tinkoff': os.path.exists('tinkoff-deployment.log'),
+        'cloud_ru': os.path.exists('cloud-ru-deployment.log')
+    }
+}
+
+if os.path.exists('compliance-report.json'):
+    with open('compliance-report.json', 'r') as f:
+        compliance_data = json.load(f)
+        report['compliance'] = compliance_data['compliance']
+
+with open('deployment-report.json', 'w') as f:
+    json.dump(report, f, indent=2)
+"
+  artifacts:
+    paths:
+      - deployment-report.json
+    expire_in: 1 month

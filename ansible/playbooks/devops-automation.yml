@@ -1,0 +1,967 @@
+---
+# Advanced Ansible Playbook for DevOps Automation
+# Provides comprehensive DevOps tools setup and management
+
+- name: DevOps Infrastructure Automation
+  hosts: all
+  become: yes
+  vars:
+    devops_user: devops
+    devops_group: devops
+    devops_home: /opt/devops
+    environment: "{{ lookup('env', 'ENVIRONMENT') | default('production') }}"
+    domain: "{{ lookup('env', 'DOMAIN') | default('devops.local') }}"
+    
+    # Monitoring configuration
+    monitoring_enabled: "{{ lookup('env', 'MONITORING_ENABLED') | default('true') }}"
+    prometheus_version: "2.40.0"
+    grafana_version: "9.3.0"
+    alertmanager_version: "0.25.0"
+    
+    # Logging configuration
+    logging_enabled: "{{ lookup('env', 'LOGGING_ENABLED') | default('true') }}"
+    elasticsearch_version: "8.5.0"
+    kibana_version: "8.5.0"
+    logstash_version: "8.5.0"
+    filebeat_version: "8.5.0"
+    
+    # CI/CD configuration
+    cicd_enabled: "{{ lookup('env', 'CICD_ENABLED') | default('true') }}"
+    jenkins_version: "2.401.3"
+    gitlab_version: "15.11.0"
+    nexus_version: "3.49.0"
+    
+    # Security configuration
+    security_enabled: "{{ lookup('env', 'SECURITY_ENABLED') | default('true') }}"
+    falco_version: "0.33.0"
+    trivy_version: "0.38.0"
+    opa_version: "0.44.0"
+    
+    # Paths
+    config_path: "{{ devops_home }}/config"
+    data_path: "{{ devops_home }}/data"
+    logs_path: "{{ devops_home }}/logs"
+    scripts_path: "{{ devops_home }}/scripts"
+
+  pre_tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - environment is defined
+          - domain is defined
+        fail_msg: "Required variables are not defined"
+    
+    - name: Check system requirements
+      assert:
+        that:
+          - ansible_memtotal_mb >= 4096
+          - ansible_processor_cores >= 2
+          - ansible_distribution_version is version('18.04', '>=')
+        fail_msg: "System does not meet minimum requirements"
+
+  tasks:
+    # System Setup
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+    
+    - name: Install required system packages
+      package:
+        name:
+          - curl
+          - wget
+          - git
+          - unzip
+          - htop
+          - vim
+          - nginx
+          - docker.io
+          - docker-compose
+          - python3
+          - python3-pip
+          - python3-venv
+          - postgresql-client
+          - redis-tools
+          - certbot
+          - python3-certbot-nginx
+          - ufw
+          - fail2ban
+          - logrotate
+          - cron
+          - jq
+          - netcat
+          - telnet
+          - nmap
+          - tcpdump
+          - iotop
+          - sysstat
+          - dstat
+          - lsof
+          - strace
+        state: present
+    
+    # User Management
+    - name: Create DevOps group
+      group:
+        name: "{{ devops_group }}"
+        system: yes
+        state: present
+    
+    - name: Create DevOps user
+      user:
+        name: "{{ devops_user }}"
+        shell: /bin/bash
+        home: "{{ devops_home }}"
+        create_home: yes
+        groups: docker,{{ devops_group }}
+        append: yes
+        system: yes
+        state: present
+    
+    - name: Create DevOps directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      loop:
+        - "{{ devops_home }}"
+        - "{{ config_path }}"
+        - "{{ data_path }}"
+        - "{{ logs_path }}"
+        - "{{ scripts_path }}"
+        - "{{ data_path }}/prometheus"
+        - "{{ data_path }}/grafana"
+        - "{{ data_path }}/elasticsearch"
+        - "{{ data_path }}/kibana"
+        - "{{ data_path }}/logstash"
+        - "{{ data_path }}/jenkins"
+        - "{{ data_path }}/gitlab"
+        - "{{ data_path }}/nexus"
+        - "{{ data_path }}/falco"
+        - "{{ data_path }}/trivy"
+        - "{{ data_path }}/opa"
+    
+    # Docker Setup
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+    
+    - name: Add DevOps user to docker group
+      user:
+        name: "{{ devops_user }}"
+        groups: docker
+        append: yes
+    
+    # Security Setup
+    - name: Configure firewall
+      ufw:
+        state: enabled
+        policy: deny
+        rule: allow
+        name: OpenSSH
+        port: 22
+        proto: tcp
+      when: ansible_os_family == "Debian"
+    
+    - name: Allow DevOps services through firewall
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - 80
+        - 443
+        - 3000  # Grafana
+        - 9090  # Prometheus
+        - 9093  # Alertmanager
+        - 5601  # Kibana
+        - 8080  # Jenkins
+        - 8081  # GitLab
+        - 8083  # Nexus
+      when: ansible_os_family == "Debian"
+    
+    - name: Configure fail2ban
+      template:
+        src: fail2ban.j2
+        dest: /etc/fail2ban/jail.local
+        owner: root
+        group: root
+        mode: '0644'
+      notify: restart fail2ban
+      when: ansible_os_family == "Debian"
+    
+    # Monitoring Stack Setup
+    - name: Install Prometheus
+      unarchive:
+        src: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-amd64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/prometheus-{{ prometheus_version }}.linux-amd64"
+      when: monitoring_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Prometheus symlink
+      file:
+        src: "{{ devops_home }}/prometheus-{{ prometheus_version }}.linux-amd64"
+        dest: "{{ devops_home }}/prometheus"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+    
+    - name: Create Prometheus configuration
+      template:
+        src: prometheus.yml.j2
+        dest: "{{ config_path }}/prometheus.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+      notify: restart prometheus
+    
+    - name: Create Prometheus systemd service
+      template:
+        src: prometheus.service.j2
+        dest: "/etc/systemd/system/prometheus.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: monitoring_enabled
+      notify:
+        - reload systemd
+        - restart prometheus
+    
+    - name: Install Grafana
+      unarchive:
+        src: "https://dl.grafana.com/oss/release/grafana/grafana-{{ grafana_version }}.linux-amd64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/grafana-{{ grafana_version }}"
+      when: monitoring_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Grafana symlink
+      file:
+        src: "{{ devops_home }}/grafana-{{ grafana_version }}"
+        dest: "{{ devops_home }}/grafana"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+    
+    - name: Create Grafana configuration
+      template:
+        src: grafana.ini.j2
+        dest: "{{ config_path }}/grafana.ini"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+      notify: restart grafana
+    
+    - name: Create Grafana systemd service
+      template:
+        src: grafana.service.j2
+        dest: "/etc/systemd/system/grafana.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: monitoring_enabled
+      notify:
+        - reload systemd
+        - restart grafana
+    
+    - name: Install Alertmanager
+      unarchive:
+        src: "https://github.com/prometheus/alertmanager/releases/download/v{{ alertmanager_version }}/alertmanager-{{ alertmanager_version }}.linux-amd64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/alertmanager-{{ alertmanager_version }}.linux-amd64"
+      when: monitoring_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Alertmanager symlink
+      file:
+        src: "{{ devops_home }}/alertmanager-{{ alertmanager_version }}.linux-amd64"
+        dest: "{{ devops_home }}/alertmanager"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+    
+    - name: Create Alertmanager configuration
+      template:
+        src: alertmanager.yml.j2
+        dest: "{{ config_path }}/alertmanager.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: monitoring_enabled
+      notify: restart alertmanager
+    
+    - name: Create Alertmanager systemd service
+      template:
+        src: alertmanager.service.j2
+        dest: "/etc/systemd/system/alertmanager.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: monitoring_enabled
+      notify:
+        - reload systemd
+        - restart alertmanager
+    
+    # Logging Stack Setup
+    - name: Install Elasticsearch
+      unarchive:
+        src: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-{{ elasticsearch_version }}-linux-x86_64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/elasticsearch-{{ elasticsearch_version }}"
+      when: logging_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Elasticsearch symlink
+      file:
+        src: "{{ devops_home }}/elasticsearch-{{ elasticsearch_version }}"
+        dest: "{{ devops_home }}/elasticsearch"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+    
+    - name: Create Elasticsearch configuration
+      template:
+        src: elasticsearch.yml.j2
+        dest: "{{ config_path }}/elasticsearch.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+      notify: restart elasticsearch
+    
+    - name: Create Elasticsearch systemd service
+      template:
+        src: elasticsearch.service.j2
+        dest: "/etc/systemd/system/elasticsearch.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: logging_enabled
+      notify:
+        - reload systemd
+        - restart elasticsearch
+    
+    - name: Install Kibana
+      unarchive:
+        src: "https://artifacts.elastic.co/downloads/kibana/kibana-{{ kibana_version }}-linux-x86_64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/kibana-{{ kibana_version }}-linux-x86_64"
+      when: logging_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Kibana symlink
+      file:
+        src: "{{ devops_home }}/kibana-{{ kibana_version }}-linux-x86_64"
+        dest: "{{ devops_home }}/kibana"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+    
+    - name: Create Kibana configuration
+      template:
+        src: kibana.yml.j2
+        dest: "{{ config_path }}/kibana.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+      notify: restart kibana
+    
+    - name: Create Kibana systemd service
+      template:
+        src: kibana.service.j2
+        dest: "/etc/systemd/system/kibana.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: logging_enabled
+      notify:
+        - reload systemd
+        - restart kibana
+    
+    - name: Install Logstash
+      unarchive:
+        src: "https://artifacts.elastic.co/downloads/logstash/logstash-{{ logstash_version }}-linux-x86_64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/logstash-{{ logstash_version }}"
+      when: logging_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Logstash symlink
+      file:
+        src: "{{ devops_home }}/logstash-{{ logstash_version }}"
+        dest: "{{ devops_home }}/logstash"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+    
+    - name: Create Logstash configuration
+      template:
+        src: logstash.yml.j2
+        dest: "{{ config_path }}/logstash.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+      notify: restart logstash
+    
+    - name: Create Logstash pipeline configuration
+      template:
+        src: logstash-pipeline.yml.j2
+        dest: "{{ config_path }}/logstash-pipeline.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+      notify: restart logstash
+    
+    - name: Create Logstash systemd service
+      template:
+        src: logstash.service.j2
+        dest: "/etc/systemd/system/logstash.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: logging_enabled
+      notify:
+        - reload systemd
+        - restart logstash
+    
+    - name: Install Filebeat
+      unarchive:
+        src: "https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-{{ filebeat_version }}-linux-x86_64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/filebeat-{{ filebeat_version }}-linux-x86_64"
+      when: logging_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Filebeat symlink
+      file:
+        src: "{{ devops_home }}/filebeat-{{ filebeat_version }}-linux-x86_64"
+        dest: "{{ devops_home }}/filebeat"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+    
+    - name: Create Filebeat configuration
+      template:
+        src: filebeat.yml.j2
+        dest: "{{ config_path }}/filebeat.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: logging_enabled
+      notify: restart filebeat
+    
+    - name: Create Filebeat systemd service
+      template:
+        src: filebeat.service.j2
+        dest: "/etc/systemd/system/filebeat.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: logging_enabled
+      notify:
+        - reload systemd
+        - restart filebeat
+    
+    # CI/CD Stack Setup
+    - name: Install Jenkins
+      get_url:
+        url: "https://pkg.jenkins.io/debian-stable/binary/jenkins_{{ jenkins_version }}_all.deb"
+        dest: "/tmp/jenkins_{{ jenkins_version }}_all.deb"
+      when: cicd_enabled
+    
+    - name: Install Jenkins package
+      apt:
+        deb: "/tmp/jenkins_{{ jenkins_version }}_all.deb"
+        state: present
+      when: cicd_enabled and ansible_os_family == "Debian"
+      notify: restart jenkins
+    
+    - name: Create Jenkins configuration
+      template:
+        src: jenkins.yml.j2
+        dest: "{{ config_path }}/jenkins.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: cicd_enabled
+      notify: restart jenkins
+    
+    - name: Create GitLab directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      loop:
+        - "{{ data_path }}/gitlab/config"
+        - "{{ data_path }}/gitlab/data"
+        - "{{ data_path }}/gitlab/logs"
+        - "{{ data_path }}/gitlab/backups"
+      when: cicd_enabled
+    
+    - name: Create GitLab configuration
+      template:
+        src: gitlab.rb.j2
+        dest: "{{ config_path }}/gitlab.rb"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: cicd_enabled
+    
+    - name: Create Nexus directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      loop:
+        - "{{ data_path }}/nexus/data"
+        - "{{ data_path }}/nexus/logs"
+        - "{{ data_path }}/nexus/tmp"
+      when: cicd_enabled
+    
+    - name: Create Nexus configuration
+      template:
+        src: nexus.properties.j2
+        dest: "{{ config_path }}/nexus.properties"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: cicd_enabled
+    
+    # Security Stack Setup
+    - name: Install Falco
+      unarchive:
+        src: "https://github.com/falcosecurity/falco/releases/download/v{{ falco_version }}/falco-{{ falco_version }}-x86_64.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/falco-{{ falco_version }}"
+      when: security_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Falco symlink
+      file:
+        src: "{{ devops_home }}/falco-{{ falco_version }}"
+        dest: "{{ devops_home }}/falco"
+        state: link
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: security_enabled
+    
+    - name: Create Falco configuration
+      template:
+        src: falco.yml.j2
+        dest: "{{ config_path }}/falco.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: security_enabled
+      notify: restart falco
+    
+    - name: Create Falco systemd service
+      template:
+        src: falco.service.j2
+        dest: "/etc/systemd/system/falco.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: security_enabled
+      notify:
+        - reload systemd
+        - restart falco
+    
+    - name: Install Trivy
+      get_url:
+        url: "https://github.com/aquasecurity/trivy/releases/download/v{{ trivy_version }}/trivy_{{ trivy_version }}_Linux-64bit.tar.gz"
+        dest: "/tmp/trivy_{{ trivy_version }}_Linux-64bit.tar.gz"
+      when: security_enabled
+    
+    - name: Extract Trivy
+      unarchive:
+        src: "/tmp/trivy_{{ trivy_version }}_Linux-64bit.tar.gz"
+        dest: "{{ devops_home }}"
+        remote_src: yes
+        creates: "{{ devops_home }}/trivy"
+      when: security_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create Trivy configuration
+      template:
+        src: trivy.yml.j2
+        dest: "{{ config_path }}/trivy.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: security_enabled
+    
+    - name: Install OPA
+      get_url:
+        url: "https://github.com/open-policy-agent/opa/releases/download/v{{ opa_version }}/opa_linux_amd64"
+        dest: "{{ devops_home }}/opa"
+        mode: '0755'
+      when: security_enabled
+      become_user: "{{ devops_user }}"
+    
+    - name: Create OPA configuration
+      template:
+        src: opa.yml.j2
+        dest: "{{ config_path }}/opa.yml"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      when: security_enabled
+    
+    - name: Create OPA systemd service
+      template:
+        src: opa.service.j2
+        dest: "/etc/systemd/system/opa.service"
+        mode: '0644'
+        owner: root
+        group: root
+      when: security_enabled
+      notify:
+        - reload systemd
+        - restart opa
+    
+    # Nginx Configuration
+    - name: Create Nginx configuration for DevOps tools
+      template:
+        src: nginx-devops.conf.j2
+        dest: "/etc/nginx/sites-available/devops"
+        mode: '0644'
+        owner: root
+        group: root
+      notify: restart nginx
+    
+    - name: Enable Nginx site
+      file:
+        src: "/etc/nginx/sites-available/devops"
+        dest: "/etc/nginx/sites-enabled/devops"
+        state: link
+      notify: restart nginx
+    
+    - name: Remove default Nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: restart nginx
+    
+    # SSL Certificate Setup
+    - name: Generate SSL certificate
+      command: >
+        certbot certonly --nginx
+        --non-interactive
+        --agree-tos
+        --email admin@{{ domain }}
+        --domains {{ domain }}
+      when: domain != "devops.local"
+      register: cert_result
+    
+    # Scripts and Automation
+    - name: Create DevOps scripts
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ scripts_path }}/{{ item.dest }}"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+      loop:
+        - { src: "backup-devops.sh.j2", dest: "backup-devops.sh" }
+        - { src: "monitor-devops.sh.j2", dest: "monitor-devops.sh" }
+        - { src: "cleanup-logs.sh.j2", dest: "cleanup-logs.sh" }
+        - { src: "health-check.sh.j2", dest: "health-check.sh" }
+        - { src: "security-scan.sh.j2", dest: "security-scan.sh" }
+        - { src: "update-tools.sh.j2", dest: "update-tools.sh" }
+    
+    - name: Setup DevOps cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "devops-backup", script: "backup-devops.sh", minute: "0", hour: "2" }
+        - { name: "devops-monitor", script: "monitor-devops.sh", minute: "*/5", hour: "*" }
+        - { name: "devops-cleanup", script: "cleanup-logs.sh", minute: "0", hour: "3" }
+        - { name: "devops-health", script: "health-check.sh", minute: "*/10", hour: "*" }
+        - { name: "devops-security", script: "security-scan.sh", minute: "0", hour: "4" }
+        - { name: "devops-update", script: "update-tools.sh", minute: "0", hour: "5", day: "1" }
+    
+    # Log Rotation
+    - name: Configure log rotation for DevOps tools
+      template:
+        src: devops-logrotate.j2
+        dest: "/etc/logrotate.d/devops"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Documentation
+    - name: Create DevOps documentation
+      template:
+        src: devops-docs.j2
+        dest: "{{ config_path }}/DEVOPS.md"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+    
+    - name: Create operations manual
+      template:
+        src: operations-manual.j2
+        dest: "{{ config_path }}/OPERATIONS.md"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: "{{ devops_group }}"
+    
+    # Start and enable services
+    - name: Start and enable monitoring services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      loop:
+        - prometheus
+        - grafana
+        - alertmanager
+      when: monitoring_enabled
+    
+    - name: Start and enable logging services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      loop:
+        - elasticsearch
+        - kibana
+        - logstash
+        - filebeat
+      when: logging_enabled
+    
+    - name: Start and enable CI/CD services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      loop:
+        - jenkins
+      when: cicd_enabled
+    
+    - name: Start and enable security services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      loop:
+        - falco
+        - opa
+      when: security_enabled
+    
+    - name: Start and enable Nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: restart prometheus
+      systemd:
+        name: prometheus
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart grafana
+      systemd:
+        name: grafana
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart alertmanager
+      systemd:
+        name: alertmanager
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart elasticsearch
+      systemd:
+        name: elasticsearch
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart kibana
+      systemd:
+        name: kibana
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart logstash
+      systemd:
+        name: logstash
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart filebeat
+      systemd:
+        name: filebeat
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart falco
+      systemd:
+        name: falco
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart opa
+      systemd:
+        name: opa
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
+        daemon_reload: yes
+    
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+        daemon_reload: yes
+    
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+  post_tasks:
+    - name: Verify DevOps tools are running
+      uri:
+        url: "http://localhost:3000/api/health"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+      when: monitoring_enabled
+    
+    - name: Verify Elasticsearch is running
+      uri:
+        url: "http://localhost:9200/_cluster/health"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+      when: logging_enabled
+    
+    - name: Verify Kibana is running
+      uri:
+        url: "http://localhost:5601/api/status"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+      when: logging_enabled
+    
+    - name: Verify Jenkins is running
+      uri:
+        url: "http://localhost:8080/"
+        method: GET
+        status_code: 200
+      retries: 5
+      delay: 10
+      when: cicd_enabled
+    
+    - name: Display DevOps setup summary
+      debug:
+        msg:
+          - "DevOps infrastructure setup completed successfully!"
+          - "Environment: {{ environment }}"
+          - "Domain: {{ domain }}"
+          - "DevOps user: {{ devops_user }}"
+          - "DevOps home: {{ devops_home }}"
+          - "Monitoring: {{ 'enabled' if monitoring_enabled else 'disabled' }}"
+          - "Logging: {{ 'enabled' if logging_enabled else 'disabled' }}"
+          - "CI/CD: {{ 'enabled' if cicd_enabled else 'disabled' }}"
+          - "Security: {{ 'enabled' if security_enabled else 'disabled' }}"
+          - "Grafana URL: http://{{ domain }}/grafana"
+          - "Prometheus URL: http://{{ domain }}/prometheus"
+          - "Kibana URL: http://{{ domain }}/kibana"
+          - "Jenkins URL: http://{{ domain }}/jenkins"
+
+  rescue:
+    - name: Display error information
+      debug:
+        msg: "DevOps setup failed! Check the logs for more details."
+    
+    - name: Collect system information for debugging
+      setup:
+        gather_facts: yes
+    
+    - name: Create debug report
+      copy:
+        dest: "/tmp/devops-debug-{{ ansible_date_time.iso8601 }}.txt"
+        content: |
+          DevOps Setup Debug Report
+          ========================
+          
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Memory: {{ ansible_memtotal_mb }}MB
+          CPU: {{ ansible_processor_cores }} cores
+          
+          Variables:
+          - environment: {{ environment }}
+          - domain: {{ domain }}
+          - devops_user: {{ devops_user }}
+          - monitoring_enabled: {{ monitoring_enabled }}
+          - logging_enabled: {{ logging_enabled }}
+          - cicd_enabled: {{ cicd_enabled }}
+          - security_enabled: {{ security_enabled }}
+          
+          Last Task Status: {{ ansible_failed_task.name if ansible_failed_task is defined else 'Unknown' }}
+          Error Message: {{ ansible_failed_result.msg if ansible_failed_result is defined else 'Unknown' }}
+    
+    - name: Fail the playbook
+      fail:
+        msg: "DevOps setup failed. Debug report saved to /tmp/devops-debug-*.txt"

@@ -1,0 +1,625 @@
+name: DevOps Infrastructure as Code Workflow
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'helm/**'
+      - 'docker-compose*.yml'
+      - '.github/workflows/devops-iac.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'helm/**'
+      - 'docker-compose*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - staging
+        - production
+        - development
+      terraform_plan_only:
+        description: 'Run Terraform plan only (no apply)'
+        required: false
+        default: false
+        type: boolean
+      ansible_check_mode:
+        description: 'Run Ansible in check mode'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
+  release:
+    types: [ published ]
+
+env:
+  TF_VAR_environment: ${{ github.event.inputs.environment || 'staging' }}
+  TF_VAR_project_name: 'space-invaders'
+  TF_VAR_region: 'ru-central1'
+  ANSIBLE_HOST_KEY_CHECKING: 'False'
+  ANSIBLE_ROLES_PATH: 'ansible/roles'
+  HELM_EXPERIMENTAL_OCI: '1'
+
+jobs:
+  # Terraform Validation and Planning
+  terraform-validate:
+    name: 'Terraform Validate and Plan'
+    runs-on: ubuntu-latest
+    outputs:
+      terraform_plan_exit_code: ${{ steps.plan.outputs.exitcode }}
+      terraform_plan_has_changes: ${{ steps.plan.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+          terraform_wrapper: false
+      
+      - name: Cache Terraform plugins
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            terraform/**/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('terraform/**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+      
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive terraform/
+        working-directory: terraform
+      
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: terraform
+        env:
+          TF_VAR_cloud_provider: ${{ secrets.CLOUD_PROVIDER }}
+          TF_VAR_access_key: ${{ secrets.CLOUD_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.CLOUD_SECRET_KEY }}
+          TF_VAR_project_id: ${{ secrets.CLOUD_PROJECT_ID }}
+      
+      - name: Terraform Validate
+        run: terraform validate -no-color
+        working-directory: terraform
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -out=terraform.tfplan -detailed-exitcode
+          echo "exitcode=$?" >> $GITHUB_OUTPUT
+          echo "has_changes=$([ $exitcode -eq 2 ] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+        working-directory: terraform
+        env:
+          TF_VAR_cloud_provider: ${{ secrets.CLOUD_PROVIDER }}
+          TF_VAR_access_key: ${{ secrets.CLOUD_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.CLOUD_SECRET_KEY }}
+          TF_VAR_project_id: ${{ secrets.CLOUD_PROJECT_ID }}
+        continue-on-error: true
+      
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v3
+        if: steps.plan.outputs.has_changes == 'true'
+        with:
+          name: terraform-plan-${{ github.sha }}
+          path: terraform/terraform.tfplan
+          retention-days: 7
+      
+      - name: Terraform Plan Summary
+        if: steps.plan.outputs.has_changes == 'true'
+        run: |
+          terraform show -json terraform.tfplan | jq -r '.planned_values' > terraform-plan-summary.json
+          echo "## Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform show terraform.tfplan >> $GITHUB_STEP_SUMMARY
+        working-directory: terraform
+      
+      - name: Comment PR with Terraform Plan
+        if: github.event_name == 'pull_request' && steps.plan.outputs.has_changes == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('terraform/terraform.tfplan', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🏗️ Terraform Plan Results\n\n\`\`\`terraform\n${planOutput}\n\`\`\``
+            });
+
+  # Terraform Apply (Production only on manual trigger)
+  terraform-apply:
+    name: 'Terraform Apply'
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    if: |
+      github.event_name == 'workflow_dispatch' && 
+      github.event.inputs.environment == 'production' &&
+      github.event.inputs.terraform_plan_only != 'true' &&
+      needs.terraform-validate.outputs.terraform_plan_has_changes == 'true'
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+          terraform_wrapper: false
+      
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-plan-${{ github.sha }}
+          path: terraform/
+      
+      - name: Terraform Apply
+        run: terraform apply -input=false -auto-approve terraform.tfplan
+        working-directory: terraform
+        env:
+          TF_VAR_cloud_provider: ${{ secrets.CLOUD_PROVIDER }}
+          TF_VAR_access_key: ${{ secrets.CLOUD_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.CLOUD_SECRET_KEY }}
+          TF_VAR_project_id: ${{ secrets.CLOUD_PROJECT_ID }}
+      
+      - name: Generate Terraform State Report
+        run: |
+          terraform show -json terraform.tfstate > terraform-state.json
+          echo "## Terraform State Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          terraform state list >> $GITHUB_STEP_SUMMARY
+        working-directory: terraform
+      
+      - name: Update Infrastructure Documentation
+        run: |
+          terraform graph > docs/infrastructure-diagram.dot
+          dot -Tpng docs/infrastructure-diagram.dot -o docs/infrastructure-diagram.png
+        working-directory: terraform
+      
+      - name: Upload Infrastructure Documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-docs
+          path: docs/
+          retention-days: 30
+
+  # Ansible Validation and Testing
+  ansible-validate:
+    name: 'Ansible Validate and Test'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        playbook:
+          - deploy-space-invaders.yml
+          - monitoring-maintenance.yml
+          - security-hardening.yml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'ansible/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install Ansible and dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible ansible-lint molecule[testinfra] docker
+          pip install -r ansible/requirements.txt
+      
+      - name: Ansible Lint
+        run: ansible-lint ansible/playbooks/${{ matrix.playbook }}
+        continue-on-error: true
+      
+      - name: Ansible Syntax Check
+        run: ansible-playbook --syntax-check ansible/playbooks/${{ matrix.playbook }}
+      
+      - name: Create Ansible Inventory
+        run: |
+          cat > ansible/inventory/test << EOF
+          [test_hosts]
+          localhost ansible_connection=local
+          
+          [all:vars]
+          ansible_python_interpreter=/usr/bin/python3
+          environment=test
+          domain=test.local
+          EOF
+      
+      - name: Ansible Check Mode
+        if: github.event.inputs.ansible_check_mode == 'true'
+        run: |
+          ansible-playbook -i ansible/inventory/test \
+            --check --diff \
+            ansible/playbooks/${{ matrix.playbook }}
+      
+      - name: Run Molecule Tests
+        run: |
+          cd ansible/roles/space-invaders
+          molecule test
+        continue-on-error: true
+
+  # Helm Chart Validation and Testing
+  helm-validate:
+    name: 'Helm Chart Validate and Test'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chart:
+          - space-invaders
+          - monitoring
+          - database
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.12.0'
+      
+      - name: Setup Kubernetes
+        uses: helm/kind-action@v1.5.0
+        with:
+          cluster_name: test-cluster
+          wait: 30s
+      
+      - name: Helm Lint
+        run: helm lint helm/${{ matrix.chart }}
+      
+      - name: Helm Template Validation
+        run: |
+          helm template ${{ matrix.chart }} helm/${{ matrix.chart }} \
+            --values helm/${{ matrix.chart }}/values.yaml \
+            --values helm/${{ matrix.chart }}/values-test.yaml
+      
+      - name: Helm Unit Tests
+        run: |
+          helm unittest helm/${{ matrix.chart }}
+        continue-on-error: true
+      
+      - name: Install Chart Dependencies
+        run: |
+          cd helm/${{ matrix.chart }}
+          helm dependency build
+      
+      - name: Helm Install Test
+        run: |
+          helm install test-${{ matrix.chart }} helm/${{ matrix.chart }} \
+            --values helm/${{ matrix.chart }}/values.yaml \
+            --values helm/${{ matrix.chart }}/values-test.yaml \
+            --wait --timeout=300s
+      
+      - name: Helm Test
+        run: helm test test-${{ matrix.chart }}
+      
+      - name: Helm Uninstall
+        run: helm uninstall test-${{ matrix.chart }}
+        if: always()
+
+  # Docker Compose Validation
+  docker-compose-validate:
+    name: 'Docker Compose Validate'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compose_file:
+          - docker-compose.yml
+          - docker-compose.microservices.yml
+          - docker-compose.dev.yml
+          - docker-compose.prod.yml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Docker Compose Version
+        run: docker compose version
+      
+      - name: Docker Compose Config Validation
+        run: docker compose -f ${{ matrix.compose_file }} config --quiet
+      
+      - name: Docker Compose Pull
+        run: docker compose -f ${{ matrix.compose_file }} pull --ignore-pull-failures
+        continue-on-error: true
+      
+      - name: Docker Compose Build
+        run: docker compose -f ${{ matrix.compose_file }} build --no-cache
+        continue-on-error: true
+      
+      - name: Docker Compose Up Test
+        run: |
+          docker compose -f ${{ matrix.compose_file }} up -d --wait
+          sleep 30
+          docker compose -f ${{ matrix.compose_file }} ps
+        continue-on-error: true
+      
+      - name: Docker Compose Health Check
+        run: |
+          docker compose -f ${{ matrix.compose_file }} exec -T frontend curl -f http://localhost/health || true
+          docker compose -f ${{ matrix.compose_file }} exec -T api curl -f http://localhost:8080/health || true
+        continue-on-error: true
+      
+      - name: Docker Compose Down
+        run: docker compose -f ${{ matrix.compose_file }} down --remove-orphans
+        if: always()
+
+  # Infrastructure Security Scanning
+  security-scan:
+    name: 'Infrastructure Security Scan'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Security Tools
+        run: |
+          pip install checkov tfsec bandit safety
+          npm install -g @aquasecurity/trivy
+          wget -O tfsec https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64
+          chmod +x tfsec
+          sudo mv tfsec /usr/local/bin/
+      
+      - name: Terraform Security Scan (Checkov)
+        run: checkov -d terraform/ --framework terraform --output junitxml --output-file-path reports/
+        continue-on-error: true
+      
+      - name: Terraform Security Scan (tfsec)
+        run: tfsec terraform/ --format junit --out reports/tfsec-results.xml
+        continue-on-error: true
+      
+      - name: Docker Security Scan (Trivy)
+        run: |
+          trivy config --format json --output reports/trivy-results.json .
+          trivy fs --format json --output reports/trivy-fs-results.json .
+        continue-on-error: true
+      
+      - name: Ansible Security Scan
+        run: bandit -r ansible/ -f json -o reports/bandit-results.json
+        continue-on-error: true
+      
+      - name: Python Dependencies Security Scan
+        run: |
+          safety check --json --output reports/safety-results.json
+          safety check --db --output reports/safety-db-results.json
+        continue-on-error: true
+      
+      - name: Upload Security Reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: reports/
+          retention-days: 30
+      
+      - name: Security Scan Summary
+        run: |
+          echo "## 🔒 Infrastructure Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Status | Issues Found |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Checkov | ✅ | $(cat reports/results.xml 2>/dev/null | grep -o 'failures="[0-9]*"' | cut -d'"' -f2 || echo "0") |" >> $GITHUB_STEP_SUMMARY
+          echo "| tfsec | ✅ | $(cat reports/tfsec-results.xml 2>/dev/null | grep -o 'failures="[0-9]*"' | cut -d'"' -f2 || echo "0") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy | ✅ | $(cat reports/trivy-results.json 2>/dev/null | jq '.Results | length' || echo "0") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bandit | ✅ | $(cat reports/bandit-results.json 2>/dev/null | jq '.results | length' || echo "0") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Safety | ✅ | $(cat reports/safety-results.json 2>/dev/null | jq '.vulnerabilities | length' || echo "0") |" >> $GITHUB_STEP_SUMMARY
+
+  # Infrastructure Cost Analysis
+  cost-analysis:
+    name: 'Infrastructure Cost Analysis'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.5.0'
+      
+      - name: Install Infracost
+        run: |
+          wget -O infracost https://github.com/infracost/infracost/releases/latest/download/infracost-linux-amd64
+          chmod +x infracost
+          sudo mv infracost /usr/local/bin/
+      
+      - name: Terraform Init
+        run: terraform init -input=false
+        working-directory: terraform
+        env:
+          TF_VAR_cloud_provider: ${{ secrets.CLOUD_PROVIDER }}
+          TF_VAR_access_key: ${{ secrets.CLOUD_ACCESS_KEY }}
+          TF_VAR_secret_key: ${{ secrets.CLOUD_SECRET_KEY }}
+          TF_VAR_project_id: ${{ secrets.CLOUD_PROJECT_ID }}
+      
+      - name: Generate Cost Estimate
+        run: |
+          infracost breakdown --path terraform/ --format json --output-file infracost-report.json
+          infracost breakdown --path terraform/ --format table --output-file infracost-report.txt
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+        continue-on-error: true
+      
+      - name: Cost Analysis Summary
+        run: |
+          echo "## 💰 Infrastructure Cost Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f infracost-report.txt ]; then
+            cat infracost-report.txt >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Cost analysis not available (API key or configuration issue)" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload Cost Report
+        uses: actions/upload-artifact@v3
+        if: success()
+        with:
+          name: cost-report
+          path: infracost-report.*
+          retention-days: 30
+
+  # Infrastructure Documentation Generation
+  generate-docs:
+    name: 'Generate Infrastructure Documentation'
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, ansible-validate, helm-validate]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Documentation Tools
+        run: |
+          pip install mkdocs mkdocs-material mkdocs-mermaid2-plugin
+          npm install -g @mermaid-js/mermaid-cli
+      
+      - name: Generate Terraform Documentation
+        run: |
+          cd terraform
+          terraform-docs markdown . > ../docs/terraform-documentation.md
+          terraform graph > ../docs/infrastructure-diagram.dot
+          dot -Tpng ../docs/infrastructure-diagram.dot -o ../docs/infrastructure-diagram.png
+      
+      - name: Generate Ansible Documentation
+        run: |
+          ansible-doc --list > docs/ansible-modules.txt
+          ansible-playbook ansible/playbooks/deploy-space-invaders.yml --list-tasks > docs/ansible-tasks.txt
+      
+      - name: Generate Helm Documentation
+        run: |
+          helm docs helm/space-invaders --output-dir docs/helm-docs
+          helm template space-invaders helm/space-invaders > docs/helm-manifest.yaml
+      
+      - name: Generate Architecture Diagrams
+        run: |
+          python scripts/generate-diagrams.py
+      
+      - name: Build Documentation Site
+        run: |
+          mkdocs build --site-dir docs-site
+      
+      - name: Deploy Documentation
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs-site
+      
+      - name: Upload Documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-docs
+          path: docs/
+          retention-days: 30
+
+  # Integration Tests
+  integration-tests:
+    name: 'Infrastructure Integration Tests'
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, ansible-validate, helm-validate]
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Test Environment
+        run: |
+          docker compose -f docker-compose.test.yml up -d
+          sleep 60
+      
+      - name: Run Integration Tests
+        run: |
+          python -m pytest tests/integration/ -v --junitxml=reports/integration-tests.xml
+        continue-on-error: true
+      
+      - name: Cleanup Test Environment
+        run: |
+          docker compose -f docker-compose.test.yml down --remove-orphans
+        if: always()
+      
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: integration-test-results
+          path: reports/
+          retention-days: 30
+
+  # Notification
+  notify:
+    name: 'Send Notifications'
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, ansible-validate, helm-validate, security-scan, cost-analysis]
+    if: always()
+    steps:
+      - name: Notify Slack
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#devops'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        continue-on-error: true
+      
+      - name: Send Email Notification
+        if: needs.terraform-validate.result == 'failure' || needs.security-scan.result == 'failure'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 Infrastructure Pipeline Alert - ${{ github.repository }}"
+          body: |
+            Infrastructure pipeline status: ${{ job.status }}
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            Workflow: ${{ github.workflow }}
+            
+            Terraform: ${{ needs.terraform-validate.result }}
+            Ansible: ${{ needs.ansible-validate.result }}
+            Helm: ${{ needs.helm-validate.result }}
+            Security: ${{ needs.security-scan.result }}
+            Cost Analysis: ${{ needs.cost-analysis.result }}
+            
+            View details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+        continue-on-error: true

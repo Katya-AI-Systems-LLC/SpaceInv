@@ -1,0 +1,576 @@
+---
+# Ansible Playbook for Space Invaders Monitoring and Maintenance
+# Provides comprehensive monitoring, backup, and maintenance automation
+
+- name: Space Invaders Monitoring and Maintenance
+  hosts: all
+  become: yes
+  vars:
+    app_name: space-invaders
+    environment: "{{ lookup('env', 'ENVIRONMENT') | default('development') }}"
+    monitoring_enabled: "{{ lookup('env', 'MONITORING_ENABLED') | default('true') }}"
+    backup_enabled: "{{ lookup('env', 'BACKUP_ENABLED') | default('true') }}"
+    log_retention_days: "{{ lookup('env', 'LOG_RETENTION_DAYS') | default('30') }}"
+    alert_email: "{{ lookup('env', 'ALERT_EMAIL') | default('admin@space-invaders.local') }}"
+    slack_webhook: "{{ lookup('env', 'SLACK_WEBHOOK') }}"
+    
+    # Paths
+    app_path: "/opt/{{ app_name }}"
+    log_path: "/var/log/{{ app_name }}"
+    data_path: "/var/lib/{{ app_name }}"
+    backup_path: "/opt/backups/{{ app_name }}"
+    monitoring_path: "/opt/monitoring/{{ app_name }}"
+    
+    # Thresholds
+    cpu_threshold: 80
+    memory_threshold: 85
+    disk_threshold: 90
+    response_time_threshold: 5000
+
+  tasks:
+    # System Monitoring Setup
+    - name: Create monitoring directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      loop:
+        - "{{ monitoring_path }}"
+        - "{{ monitoring_path }}/scripts"
+        - "{{ monitoring_path }}/logs"
+        - "{{ monitoring_path }}/alerts"
+    
+    - name: Install monitoring packages
+      package:
+        name:
+          - htop
+          - iotop
+          - nethogs
+          - sysstat
+          - dstat
+          - lsof
+          - strace
+          - tcpdump
+          - nmap
+          - curl
+          - jq
+          - python3
+          - python3-pip
+        state: present
+    
+    - name: Install Python monitoring libraries
+      pip:
+        name:
+          - psutil
+          - requests
+          - prometheus-client
+          - grafana-api
+          - slack-sdk
+        state: present
+        executable: pip3
+    
+    # Performance Monitoring
+    - name: Create performance monitoring script
+      template:
+        src: performance-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/performance-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create performance monitoring cron job
+      cron:
+        name: "{{ app_name }} performance monitor"
+        job: "{{ monitoring_path }}/scripts/performance-monitor.py"
+        minute: "*/5"
+        user: root
+    
+    # Log Monitoring
+    - name: Create log monitoring script
+      template:
+        src: log-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/log-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create log monitoring cron job
+      cron:
+        name: "{{ app_name }} log monitor"
+        job: "{{ monitoring_path }}/scripts/log-monitor.py"
+        minute: "*/10"
+        user: root
+    
+    # Health Check Monitoring
+    - name: Create health check monitoring script
+      template:
+        src: health-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/health-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create health check monitoring cron job
+      cron:
+        name: "{{ app_name }} health monitor"
+        job: "{{ monitoring_path }}/scripts/health-monitor.py"
+        minute: "*/2"
+        user: root
+    
+    # Security Monitoring
+    - name: Create security monitoring script
+      template:
+        src: security-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/security-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create security monitoring cron job
+      cron:
+        name: "{{ app_name }} security monitor"
+        job: "{{ monitoring_path }}/scripts/security-monitor.py"
+        minute: "*/15"
+        user: root
+    
+    # Database Monitoring
+    - name: Create database monitoring script
+      template:
+        src: database-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/database-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create database monitoring cron job
+      cron:
+        name: "{{ app_name }} database monitor"
+        job: "{{ monitoring_path }}/scripts/database-monitor.py"
+        minute: "*/10"
+        user: root
+    
+    # Backup Monitoring
+    - name: Create backup monitoring script
+      template:
+        src: backup-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/backup-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create backup monitoring cron job
+      cron:
+        name: "{{ app_name }} backup monitor"
+        job: "{{ monitoring_path }}/scripts/backup-monitor.py"
+        minute: "0"
+        hour: "6"
+        user: root
+    
+    # Alert Management
+    - name: Create alert management script
+      template:
+        src: alert-manager.py.j2
+        dest: "{{ monitoring_path }}/scripts/alert-manager.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    # Log Rotation and Cleanup
+    - name: Create log cleanup script
+      template:
+        src: log-cleanup.sh.j2
+        dest: "{{ monitoring_path }}/scripts/log-cleanup.sh"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create log cleanup cron job
+      cron:
+        name: "{{ app_name }} log cleanup"
+        job: "{{ monitoring_path }}/scripts/log-cleanup.sh"
+        minute: "0"
+        hour: "2"
+        user: root
+    
+    # Backup Automation
+    - name: Create comprehensive backup script
+      template:
+        src: comprehensive-backup.sh.j2
+        dest: "{{ monitoring_path }}/scripts/comprehensive-backup.sh"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create backup cron job
+      cron:
+        name: "{{ app_name }} comprehensive backup"
+        job: "{{ monitoring_path }}/scripts/comprehensive-backup.sh"
+        minute: "0"
+        hour: "1"
+        user: root
+    
+    # System Maintenance
+    - name: Create system maintenance script
+      template:
+        src: system-maintenance.sh.j2
+        dest: "{{ monitoring_path }}/scripts/system-maintenance.sh"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create system maintenance cron job
+      cron:
+        name: "{{ app_name }} system maintenance"
+        job: "{{ monitoring_path }}/scripts/system-maintenance.sh"
+        minute: "0"
+        hour: "3"
+        day: "1"
+        user: root
+    
+    # Performance Tuning
+    - name: Create performance tuning script
+      template:
+        src: performance-tuning.sh.j2
+        dest: "{{ monitoring_path }}/scripts/performance-tuning.sh"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create performance tuning cron job
+      cron:
+        name: "{{ app_name }} performance tuning"
+        job: "{{ monitoring_path }}/scripts/performance-tuning.sh"
+        minute: "0"
+        hour: "4"
+        day: "1"
+        user: root
+    
+    # Resource Usage Reporting
+    - name: Create resource usage report script
+      template:
+        src: resource-report.py.j2
+        dest: "{{ monitoring_path }}/scripts/resource-report.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create resource report cron job
+      cron:
+        name: "{{ app_name }} resource report"
+        job: "{{ monitoring_path }}/scripts/resource-report.py"
+        minute: "0"
+        hour: "9"
+        user: root
+    
+    # Log Analysis
+    - name: Create log analysis script
+      template:
+        src: log-analyzer.py.j2
+        dest: "{{ monitoring_path }}/scripts/log-analyzer.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create log analysis cron job
+      cron:
+        name: "{{ app_name }} log analysis"
+        job: "{{ monitoring_path }}/scripts/log-analyzer.py"
+        minute: "0"
+        hour: "8"
+        user: root
+    
+    # Network Monitoring
+    - name: Create network monitoring script
+      template:
+        src: network-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/network-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create network monitoring cron job
+      cron:
+        name: "{{ app_name }} network monitor"
+        job: "{{ monitoring_path }}/scripts/network-monitor.py"
+        minute: "*/5"
+        user: root
+    
+    # Application Metrics Collection
+    - name: Create application metrics script
+      template:
+        src: app-metrics.py.j2
+        dest: "{{ monitoring_path }}/scripts/app-metrics.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create application metrics cron job
+      cron:
+        name: "{{ app_name }} app metrics"
+        job: "{{ monitoring_path }}/scripts/app-metrics.py"
+        minute: "*/1"
+        user: root
+    
+    # Dashboard Generation
+    - name: Create dashboard generation script
+      template:
+        src: dashboard-generator.py.j2
+        dest: "{{ monitoring_path }}/scripts/dashboard-generator.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create dashboard generation cron job
+      cron:
+        name: "{{ app_name }} dashboard generator"
+        job: "{{ monitoring_path }}/scripts/dashboard-generator.py"
+        minute: "*/10"
+        user: root
+    
+    # Alert Configuration
+    - name: Create alert configuration
+      template:
+        src: alert-config.json.j2
+        dest: "{{ monitoring_path }}/config/alert-config.json"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Monitoring Configuration
+    - name: Create monitoring configuration
+      template:
+        src: monitoring-config.json.j2
+        dest: "{{ monitoring_path }}/config/monitoring-config.json"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Log Configuration
+    - name: Create log configuration
+      template:
+        src: log-config.json.j2
+        dest: "{{ monitoring_path }}/config/log-config.json"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Service Status Monitoring
+    - name: Create service status script
+      template:
+        src: service-status.py.j2
+        dest: "{{ monitoring_path }}/scripts/service-status.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create service status cron job
+      cron:
+        name: "{{ app_name }} service status"
+        job: "{{ monitoring_path }}/scripts/service-status.py"
+        minute: "*/3"
+        user: root
+    
+    # Disk Usage Monitoring
+    - name: Create disk usage script
+      template:
+        src: disk-usage.py.j2
+        dest: "{{ monitoring_path }}/scripts/disk-usage.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create disk usage cron job
+      cron:
+        name: "{{ app_name }} disk usage"
+        job: "{{ monitoring_path }}/scripts/disk-usage.py"
+        minute: "*/10"
+        user: root
+    
+    # Memory Usage Monitoring
+    - name: Create memory usage script
+      template:
+        src: memory-usage.py.j2
+        dest: "{{ monitoring_path }}/scripts/memory-usage.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create memory usage cron job
+      cron:
+        name: "{{ app_name }} memory usage"
+        job: "{{ monitoring_path }}/scripts/memory-usage.py"
+        minute: "*/5"
+        user: root
+    
+    # Process Monitoring
+    - name: Create process monitoring script
+      template:
+        src: process-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/process-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create process monitoring cron job
+      cron:
+        name: "{{ app_name }} process monitor"
+        job: "{{ monitoring_path }}/scripts/process-monitor.py"
+        minute: "*/2"
+        user: root
+    
+    # SSL Certificate Monitoring
+    - name: Create SSL certificate monitoring script
+      template:
+        src: ssl-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/ssl-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create SSL certificate monitoring cron job
+      cron:
+        name: "{{ app_name }} ssl monitor"
+        job: "{{ monitoring_path }}/scripts/ssl-monitor.py"
+        minute: "0"
+        hour: "6"
+        user: root
+    
+    # Update Monitoring
+    - name: Create update monitoring script
+      template:
+        src: update-monitor.py.j2
+        dest: "{{ monitoring_path }}/scripts/update-monitor.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create update monitoring cron job
+      cron:
+        name: "{{ app_name }} update monitor"
+        job: "{{ monitoring_path }}/scripts/update-monitor.py"
+        minute: "0"
+        hour: "7"
+        day: "1"
+        user: root
+    
+    # Documentation Generation
+    - name: Create monitoring documentation
+      template:
+        src: monitoring-docs.j2
+        dest: "{{ monitoring_path }}/MONITORING.md"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    - name: Create operations documentation
+      template:
+        src: operations-docs.j2
+        dest: "{{ monitoring_path }}/OPERATIONS.md"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Monitoring Dashboard
+    - name: Create monitoring dashboard
+      template:
+        src: monitoring-dashboard.html.j2
+        dest: "{{ monitoring_path }}/dashboard/index.html"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    # Setup Monitoring Service
+    - name: Create monitoring service
+      template:
+        src: monitoring-service.py.j2
+        dest: "{{ monitoring_path }}/scripts/monitoring-service.py"
+        mode: '0755'
+        owner: root
+        group: root
+    
+    - name: Create monitoring service systemd unit
+      template:
+        src: monitoring-service.service.j2
+        dest: "/etc/systemd/system/{{ app_name }}-monitoring.service"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    - name: Start and enable monitoring service
+      systemd:
+        name: "{{ app_name }}-monitoring"
+        state: started
+        enabled: yes
+        daemon_reload: yes
+      when: monitoring_enabled
+
+  handlers:
+    - name: restart monitoring service
+      systemd:
+        name: "{{ app_name }}-monitoring"
+        state: restarted
+
+  post_tasks:
+    - name: Verify monitoring scripts are executable
+      command: "find {{ monitoring_path }}/scripts -name '*.py' -executable"
+      register: executable_scripts
+    
+    - name: Verify monitoring service is running
+      systemd:
+        name: "{{ app_name }}-monitoring"
+      state: started
+      enabled: yes
+      when: monitoring_enabled
+    
+    - name: Display monitoring setup summary
+      debug:
+        msg:
+          - "Monitoring setup completed successfully!"
+          - "Monitoring path: {{ monitoring_path }}"
+          - "Scripts directory: {{ monitoring_path }}/scripts"
+          - "Logs directory: {{ monitoring_path }}/logs"
+          - "Alerts directory: {{ monitoring_path }}/alerts"
+          - "Dashboard: {{ monitoring_path }}/dashboard/index.html"
+          - "Service: {{ app_name }}-monitoring"
+          - "Monitoring enabled: {{ monitoring_enabled }}"
+          - "Backup enabled: {{ backup_enabled }}"
+          - "Log retention: {{ log_retention_days }} days"
+          - "Alert email: {{ alert_email }}"
+          - "CPU threshold: {{ cpu_threshold }}%"
+          - "Memory threshold: {{ memory_threshold }}%"
+          - "Disk threshold: {{ disk_threshold }}%"
+          - "Response time threshold: {{ response_time_threshold }}ms"
+
+  rescue:
+    - name: Display monitoring setup error
+      debug:
+        msg: "Monitoring setup failed! Check the logs for more details."
+    
+    - name: Create monitoring setup debug report
+      copy:
+        dest: "/tmp/monitoring-debug-{{ ansible_date_time.iso8601 }}.txt"
+        content: |
+          Monitoring Setup Debug Report
+          ==========================
+          
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Memory: {{ ansible_memtotal_mb }}MB
+          CPU: {{ ansible_processor_cores }} cores
+          
+          Variables:
+          - app_name: {{ app_name }}
+          - environment: {{ environment }}
+          - monitoring_enabled: {{ monitoring_enabled }}
+          - backup_enabled: {{ backup_enabled }}
+          - monitoring_path: {{ monitoring_path }}
+          
+          Last Task Status: {{ ansible_failed_task.name if ansible_failed_task is defined else 'Unknown' }}
+          Error Message: {{ ansible_failed_result.msg if ansible_failed_result is defined else 'Unknown' }}
+    
+    - name: Fail the playbook
+      fail:
+        msg: "Monitoring setup failed. Debug report saved to /tmp/monitoring-debug-*.txt"

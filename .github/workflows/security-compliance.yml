@@ -1,0 +1,597 @@
+name: Advanced Security and Compliance Workflow
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Dockerfile*'
+      - 'docker-compose*.yml'
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'helm/**'
+      - '.github/workflows/security-compliance.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Dockerfile*'
+      - 'docker-compose*.yml'
+      - 'terraform/**'
+      - 'ansible/**'
+      - 'helm/**'
+  workflow_dispatch:
+    inputs:
+      security_level:
+        description: 'Security scanning level'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+        - basic
+        - standard
+        - comprehensive
+      compliance_frameworks:
+        description: 'Compliance frameworks to check'
+        required: false
+        default: 'GDPR,SOC2,ISO27001'
+        type: string
+      create_report:
+        description: 'Create security report'
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
+
+env:
+  SECURITY_LEVEL: ${{ github.event.inputs.security_level || 'standard' }}
+  COMPLIANCE_FRAMEWORKS: ${{ github.event.inputs.compliance_frameworks || 'GDPR,SOC2,ISO27001' }}
+  CREATE_REPORT: ${{ github.event.inputs.create_report || 'true' }}
+
+jobs:
+  # Static Application Security Testing (SAST)
+  sast:
+    name: Static Application Security Testing
+    runs-on: ubuntu-latest
+    outputs:
+      sast-report: ${{ steps.sast.outputs.report-path }}
+      vulnerabilities-found: ${{ steps.sast.outputs.vulnerabilities }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install security tools
+        run: |
+          pip install bandit safety semgrep trivy-python
+          pip install -r requirements.txt || true
+
+      - name: Run Bandit SAST
+        id: bandit
+        run: |
+          bandit -r src/ -f json -o bandit-report.json || true
+          bandit -r src/ -f txt -o bandit-report.txt || true
+          echo "bandit-report=bandit-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run Safety dependency scanning
+        id: safety
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check --text --output safety-report.txt || true
+          echo "safety-report=safety-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run Semgrep SAST
+        id: semgrep
+        run: |
+          semgrep --config=auto --json --output=semgrep-report.json src/ || true
+          semgrep --config=auto --text --output=semgrep-report.txt src/ || true
+          echo "semgrep-report=semgrep-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/init@v2
+        with:
+          languages: python, javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v2
+
+      - name: Perform CodeQL Analysis
+        id: codeql
+        uses: github/codeql-action/analyze@v2
+        with:
+          output: sarif-results
+
+      - name: Aggregate SAST results
+        id: sast
+        run: |
+          python scripts/security/aggregate-sast-results.py \
+            --bandit-report bandit-report.json \
+            --safety-report safety-report.json \
+            --semgrep-report semgrep-report.json \
+            --codeql-report sarif-results \
+            --output sast-aggregated.json
+          
+          VULNS=$(jq '.total_vulnerabilities' sast-aggregated.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=sast-aggregated.json" >> $GITHUB_OUTPUT
+
+      - name: Upload SAST artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: sast-reports
+          path: |
+            bandit-report.*
+            safety-report.*
+            semgrep-report.*
+            sarif-results
+            sast-aggregated.json
+          retention-days: 30
+
+  # Container Security Scanning
+  container-security:
+    name: Container Security Scanning
+    runs-on: ubuntu-latest
+    needs: sast
+    outputs:
+      container-report: ${{ steps.container.outputs.report-path }}
+      vulnerabilities-found: ${{ steps.container.outputs.vulnerabilities }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: spaceinvaders/security-test:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy
+
+      - name: Run Trivy vulnerability scanner
+        id: trivy
+        run: |
+          trivy image --format json --output trivy-report.json spaceinvaders/security-test:latest
+          trivy image --format table --output trivy-report.txt spaceinvaders/security-test:latest
+          
+          VULNS=$(jq '.Results[0].Vulnerabilities | length' trivy-report.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=trivy-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run Grype vulnerability scanner
+        id: grype
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+          grype spaceinvaders/security-test:latest -o json > grype-report.json
+          grype spaceinvaders/security-test:latest -o table > grype-report.txt
+          
+          VULNS=$(jq '.matches | length' grype-report.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run Docker Scout
+        id: docker-scout
+        run: |
+          docker scout cves --json spaceinvaders/security-test:latest > docker-scout-report.json
+          docker scout cves spaceinvaders/security-test:latest > docker-scout-report.txt
+          
+          VULNS=$(jq '.vulnerabilities | length' docker-scout-report.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+        continue-on-error: true
+        env:
+          DOCKER_SCOUT_TOKEN: ${{ secrets.DOCKER_SCOUT_TOKEN }}
+
+      - name: Aggregate container security results
+        id: container
+        run: |
+          python scripts/security/aggregate-container-results.py \
+            --trivy-report trivy-report.json \
+            --grype-report grype-report.json \
+            --docker-scout-report docker-scout-report.json \
+            --output container-aggregated.json
+          
+          VULNS=$(jq '.total_vulnerabilities' container-aggregated.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=container-aggregated.json" >> $GITHUB_OUTPUT
+
+      - name: Upload container security artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: container-security-reports
+          path: |
+            trivy-report.*
+            grype-report.*
+            docker-scout-report.*
+            container-aggregated.json
+          retention-days: 30
+
+  # Infrastructure Security Scanning
+  infrastructure-security:
+    name: Infrastructure Security Scanning
+    runs-on: ubuntu-latest
+    outputs:
+      infra-report: ${{ steps.infra.outputs.report-path }}
+      vulnerabilities-found: ${{ steps.infra.outputs.vulnerabilities }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Install security tools
+        run: |
+          pip install checkov tfsec
+          wget -O tfsec https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64
+          chmod +x tfsec
+          sudo mv tfsec /usr/local/bin/
+
+      - name: Run Checkov IaC scanning
+        id: checkov
+        run: |
+          checkov -d terraform/ --framework terraform --output json --output-file-path checkov-report
+          checkov -d terraform/ --framework terraform --output cli --output-file-path checkov-cli-report
+          
+          VULNS=$(jq '.summary.failed' checkov-report/results.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=checkov-report/results.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run TFSEC scanning
+        id: tfsec
+        run: |
+          tfsec terraform/ --format json --out tfsec-report.json
+          tfsec terraform/ --format text --out tfsec-report.txt
+          
+          VULNS=$(jq '.results | length' tfsec-report.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=tfsec-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run Terrascan
+        id: terrascan
+        run: |
+          curl -L "$(curl -s https://api.github.com/repos/tenable/terrascan/releases/latest | grep -o 'https://.*terrascan_*_Linux_x86_64.tar.gz')" | tar xz
+          ./terrascan scan terraform/ -o json -f terrascan-report.json
+          ./terrascan scan terraform/ -o cli -f terrascan-report.txt
+          
+          VULNS=$(jq '.results | length' terrascan-report.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=terrascan-report.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Aggregate infrastructure security results
+        id: infra
+        run: |
+          python scripts/security/aggregate-infra-results.py \
+            --checkov-report checkov-report/results.json \
+            --tfsec-report tfsec-report.json \
+            --terrascan-report terrascan-report.json \
+            --output infra-aggregated.json
+          
+          VULNS=$(jq '.total_vulnerabilities' infra-aggregated.json || echo "0")
+          echo "vulnerabilities=$VULNS" >> $GITHUB_OUTPUT
+          echo "report-path=infra-aggregated.json" >> $GITHUB_OUTPUT
+
+      - name: Upload infrastructure security artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: infra-security-reports
+          path: |
+            checkov-report.*
+            tfsec-report.*
+            terrascan-report.*
+            infra-aggregated.json
+          retention-days: 30
+
+  # Compliance Checking
+  compliance:
+    name: Compliance Checking
+    runs-on: ubuntu-latest
+    needs: [sast, container-security, infrastructure-security]
+    outputs:
+      compliance-report: ${{ steps.compliance.outputs.report-path }}
+      compliance-status: ${{ steps.compliance.outputs.status }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install compliance tools
+        run: |
+          pip install compliance-checker
+          pip install -r requirements.txt || true
+
+      - name: Download security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: security-reports/
+
+      - name: Run GDPR compliance check
+        id: gdpr
+        run: |
+          python scripts/compliance/gdpr-check.py \
+            --source-dir src/ \
+            --config-dir config/ \
+            --output gdpr-compliance.json
+          
+          echo "report-path=gdpr-compliance.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run SOC2 compliance check
+        id: soc2
+        run: |
+          python scripts/compliance/soc2-check.py \
+            --source-dir src/ \
+            --config-dir config/ \
+            --security-reports security-reports/ \
+            --output soc2-compliance.json
+          
+          echo "report-path=soc2-compliance.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run ISO27001 compliance check
+        id: iso27001
+        run: |
+          python scripts/compliance/iso27001-check.py \
+            --source-dir src/ \
+            --config-dir config/ \
+            --security-reports security-reports/ \
+            --output iso27001-compliance.json
+          
+          echo "report-path=iso27001-compliance.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Run PCI-DSS compliance check
+        id: pci-dss
+        run: |
+          python scripts/compliance/pci-dss-check.py \
+            --source-dir src/ \
+            --config-dir config/ \
+            --security-reports security-reports/ \
+            --output pci-dss-compliance.json
+          
+          echo "report-path=pci-dss-compliance.json" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Aggregate compliance results
+        id: compliance
+        run: |
+          python scripts/compliance/aggregate-compliance-results.py \
+            --gdpr-report gdpr-compliance.json \
+            --soc2-report soc2-compliance.json \
+            --iso27001-report iso27001-compliance.json \
+            --pci-dss-report pci-dss-compliance.json \
+            --frameworks "${COMPLIANCE_FRAMEWORKS}" \
+            --output compliance-aggregated.json
+          
+          STATUS=$(jq '.overall_status' compliance-aggregated.json || echo "FAILED")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "report-path=compliance-aggregated.json" >> $GITHUB_OUTPUT
+
+      - name: Upload compliance artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: compliance-reports
+          path: |
+            gdpr-compliance.json
+            soc2-compliance.json
+            iso27001-compliance.json
+            pci-dss-compliance.json
+            compliance-aggregated.json
+          retention-days: 30
+
+  # Security Reporting
+  security-reporting:
+    name: Security Reporting
+    runs-on: ubuntu-latest
+    needs: [sast, container-security, infrastructure-security, compliance]
+    if: env.CREATE_REPORT == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install reporting tools
+        run: |
+          pip install jinja2 weasyprint matplotlib seaborn
+          pip install -r requirements.txt || true
+
+      - name: Download all security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: all-reports/
+
+      - name: Generate executive security report
+        run: |
+          python scripts/security/generate-executive-report.py \
+            --sast-report all-reports/sast-reports/sast-aggregated.json \
+            --container-report all-reports/container-security-reports/container-aggregated.json \
+            --infra-report all-reports/infra-security-reports/infra-aggregated.json \
+            --compliance-report all-reports/compliance-reports/compliance-aggregated.json \
+            --template templates/executive-security-report.html \
+            --output security-executive-report.html
+
+      - name: Generate technical security report
+        run: |
+          python scripts/security/generate-technical-report.py \
+            --sast-report all-reports/sast-reports/sast-aggregated.json \
+            --container-report all-reports/container-security-reports/container-aggregated.json \
+            --infra-report all-reports/infra-security-reports/infra-aggregated.json \
+            --compliance-report all-reports/compliance-reports/compliance-aggregated.json \
+            --template templates/technical-security-report.html \
+            --output security-technical-report.html
+
+      - name: Generate PDF reports
+        run: |
+          python scripts/security/generate-pdf-reports.py \
+            --html-dir . \
+            --output-dir pdf-reports/
+
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            security-*-report.html
+            pdf-reports/
+          retention-days: 90
+
+  # Security Gate
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+    needs: [sast, container-security, infrastructure-security, compliance]
+    steps:
+      - name: Download security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: security-reports/
+
+      - name: Evaluate security gate
+        run: |
+          python scripts/security/evaluate-security-gate.py \
+            --sast-report security-reports/sast-reports/sast-aggregated.json \
+            --container-report security-reports/container-security-reports/container-aggregated.json \
+            --infra-report security-reports/infra-security-reports/infra-aggregated.json \
+            --compliance-report security-reports/compliance-reports/compliance-aggregated.json \
+            --thresholds security-gate-thresholds.json \
+            --output security-gate-result.json
+          
+          GATE_STATUS=$(jq '.gate_status' security-gate-result.json)
+          if [ "$GATE_STATUS" != "PASSED" ]; then
+            echo "Security gate failed!"
+            cat security-gate-result.json
+            exit 1
+          fi
+          
+          echo "Security gate passed!"
+
+  # Notification
+  notification:
+    name: Security Notification
+    runs-on: ubuntu-latest
+    needs: [security-reporting, security-gate]
+    if: always()
+    steps:
+      - name: Download security reports
+        uses: actions/download-artifact@v3
+        with:
+          path: security-reports/
+
+      - name: Send Slack notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#security'
+          text: |
+            Security and Compliance Scan Results:
+            - SAST: ${{ needs.sast.outputs.vulnerabilities-found }} vulnerabilities
+            - Container: ${{ needs.container-security.outputs.vulnerabilities-found }} vulnerabilities
+            - Infrastructure: ${{ needs.infrastructure-security.outputs.vulnerabilities-found }} vulnerabilities
+            - Compliance: ${{ needs.compliance.outputs.compliance-status }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_SECURITY_WEBHOOK }}
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Security Scan Results - ${{ github.repository }}"
+          body: |
+            Security and Compliance Scan Results:
+            
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            
+            Results:
+            - SAST: ${{ needs.sast.outputs.vulnerabilities-found }} vulnerabilities
+            - Container: ${{ needs.container-security.outputs.vulnerabilities-found }} vulnerabilities
+            - Infrastructure: ${{ needs.infrastructure-security.outputs.vulnerabilities-found }} vulnerabilities
+            - Compliance: ${{ needs.compliance.outputs.compliance-status }}
+            
+            Security Gate: ${{ needs.security-gate.result }}
+            
+            Reports are available in the artifacts.
+          to: ${{ secrets.SECURITY_EMAIL }}
+          from: GitHub Actions <${{ secrets.EMAIL_USERNAME }}>
+
+      - name: Create GitHub Issue for security findings
+        if: needs.security-gate.result == 'failure'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const gateResult = JSON.parse(fs.readFileSync('security-gate-result.json', 'utf8'));
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Security Gate Failed - ${new Date().toISOString()}`,
+              body: `
+            ## Security Gate Failed
+            
+            **Repository**: ${{ github.repository }}
+            **Branch**: ${{ github.ref_name }}
+            **Commit**: ${{ github.sha }}
+            
+            ### Security Findings:
+            - **SAST**: ${{ needs.sast.outputs.vulnerabilities-found }} vulnerabilities
+            - **Container**: ${{ needs.container-security.outputs.vulnerabilities-found }} vulnerabilities
+            - **Infrastructure**: ${{ needs.infrastructure-security.outputs.vulnerabilities-found }} vulnerabilities
+            - **Compliance**: ${{ needs.compliance.outputs.compliance-status }}
+            
+            ### Gate Results:
+            \`\`\`json
+            ${JSON.stringify(gateResult, null, 2)}
+            \`\`\`
+            
+            ### Action Required:
+            Please review the security findings and address the critical issues before merging.
+            
+            **Security Reports**: Available in the workflow artifacts.
+              `,
+              labels: ['security', 'compliance', 'high-priority']
+            });

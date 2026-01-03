@@ -1,0 +1,550 @@
+# GitLab CI/CD Template for DevOps Monitoring and Automation
+# Provides comprehensive monitoring, alerting, and automation capabilities
+
+stages:
+  - monitor
+  - analyze
+  - alert
+  - automate
+  - report
+
+variables:
+  MONITORING_ENABLED: "true"
+  ALERT_ENABLED: "true"
+  AUTOMATION_ENABLED: "true"
+  ENVIRONMENT: "production"
+  SLACK_WEBHOOK: "$SLACK_WEBHOOK"
+  TELEGRAM_BOT_TOKEN: "$TELEGRAM_BOT_TOKEN"
+  TELEGRAM_CHAT_ID: "$TELEGRAM_CHAT_ID"
+  PROMETHEUS_URL: "$PROMETHEUS_URL"
+  GRAFANA_URL: "$GRAFANA_URL"
+
+# Health Monitoring
+monitor:health:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl wget
+    - pip install requests psutil prometheus-client
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/health-monitor.py --environment $ENVIRONMENT --output monitoring/health-report.json
+    - python scripts/devops/app-health-monitor.py --environment $ENVIRONMENT --endpoints monitoring/endpoints.json --output monitoring/app-health.json
+    - python scripts/devops/db-health-monitor.py --environment $ENVIRONMENT --connection-string "$DB_CONNECTION_STRING" --output monitoring/db-health.json
+    - python scripts/devops/infra-health-monitor.py --environment $ENVIRONMENT --cloud-provider "$CLOUD_PROVIDER" --credentials "$CLOUD_CREDENTIALS" --output monitoring/infra-health.json
+    - python scripts/devops/generate-health-dashboard.py --reports-dir monitoring/ --output monitoring/health-dashboard.html
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Performance Monitoring
+monitor:performance:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install matplotlib pandas numpy seaborn plotly requests
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/performance-collector.py --environment $ENVIRONMENT --duration 300 --output monitoring/performance-metrics.json
+    - python scripts/devops/performance-analyzer.py --metrics monitoring/performance-metrics.json --output monitoring/performance-analysis.json
+    - python scripts/devops/performance-reporter.py --analysis monitoring/performance-analysis.json --output monitoring/performance-report.html
+    - python scripts/devops/performance-alerting.py --analysis monitoring/performance-analysis.json --thresholds monitoring/performance-thresholds.json --slack-webhook $SLACK_WEBHOOK
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Security Monitoring
+monitor:security:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl wget
+    - pip install requests cryptography
+    - wget -O trivy https://github.com/aquasecurity/trivy/releases/latest/download/trivy-linux-amd64
+    - chmod +x trivy
+    - mv trivy /usr/local/bin/
+  script:
+    - trivy image --format json --output monitoring/container-security.json spaceinvaders/space-invaders:latest
+    - trivy config --format json --output monitoring/infra-security.json .
+    - trivy fs --format json --output monitoring/fs-security.json .
+    - python scripts/devops/network-security-monitor.py --environment $ENVIRONMENT --output monitoring/network-security.json
+    - python scripts/devops/access-log-analyzer.py --log-path /var/log/nginx/access.log --output monitoring/access-analysis.json
+    - python scripts/devops/security-alerting.py --reports-dir monitoring/ --thresholds monitoring/security-thresholds.json --slack-webhook $SLACK_WEBHOOK
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Log Monitoring
+monitor:logs:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install elasticsearch-py logstash asyncio aiohttp
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/log-collector.py --environment $ENVIRONMENT --sources monitoring/log-sources.json --output monitoring/logs/
+    - python scripts/devops/error-pattern-analyzer.py --log-dir monitoring/logs/ --output monitoring/error-patterns.json
+    - python scripts/devops/log-anomaly-detector.py --log-dir monitoring/logs/ --output monitoring/log-anomalies.json
+    - python scripts/devops/log-reporter.py --patterns monitoring/error-patterns.json --anomalies monitoring/log-anomalies.json --output monitoring/log-report.html
+    - python scripts/devops/log-alerting.py --patterns monitoring/error-patterns.json --anomalies monitoring/log-anomalies.json --slack-webhook $SLACK_WEBHOOK
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Resource Monitoring
+monitor:resources:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests boto3 google-cloud-storage azure-storage-blob
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/resource-usage-analyzer.py --environment $ENVIRONMENT --prometheus-url $PROMETHEUS_URL --output monitoring/resource-usage.json
+    - python scripts/devops/cost-analyzer.py --environment $ENVIRONMENT --cloud-provider "$CLOUD_PROVIDER" --credentials "$CLOUD_CREDENTIALS" --output monitoring/cost-analysis.json
+    - python scripts/devops/resource-optimization.py --usage monitoring/resource-usage.json --output monitoring/resource-optimization.json
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Compliance Monitoring
+monitor:compliance:
+  stage: monitor
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests cryptography
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/gdpr-compliance-check.py --environment $ENVIRONMENT --output monitoring/gdpr-compliance.json
+    - python scripts/devops/security-standards-check.py --environment $ENVIRONMENT --standards monitoring/compliance-standards.json --output monitoring/security-compliance.json
+    - python scripts/devops/data-privacy-audit.py --environment $ENVIRONMENT --output monitoring/data-privacy.json
+    - python scripts/devops/compliance-reporter.py --reports-dir monitoring/ --output monitoring/compliance-report.html
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Metrics Analysis
+analyze:metrics:
+  stage: analyze
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests pandas matplotlib
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/deployment-metrics.py --environment $ENVIRONMENT --output analysis/deployment-metrics.json
+    - python scripts/devops/performance-metrics.py --environment $ENVIRONMENT --output analysis/performance-metrics.json
+    - python scripts/devops/security-metrics.py --environment $ENVIRONMENT --output analysis/security-metrics.json
+    - python scripts/devops/devops-dashboard.py --metrics-dir analysis/ --output analysis/devops-dashboard.html
+  artifacts:
+    reports:
+      junit: analysis/junit.xml
+    paths:
+      - analysis/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Trend Analysis
+analyze:trends:
+  stage: analyze
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:resources]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install pandas numpy matplotlib seaborn
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/trend-analyzer.py --metrics-dir monitoring/ --output analysis/trends.json
+    - python scripts/devops/predictive-analysis.py --trends analysis/trends.json --output analysis/predictions.json
+    - python scripts/devops/trend-reporter.py --trends analysis/trends.json --predictions analysis/predictions.json --output analysis/trend-report.html
+  artifacts:
+    reports:
+      junit: analysis/junit.xml
+    paths:
+      - analysis/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Anomaly Detection
+analyze:anomalies:
+  stage: analyze
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install scikit-learn pandas numpy
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/anomaly-detector.py --metrics-dir monitoring/ --output analysis/anomalies.json
+    - python scripts/devops/anomaly-classifier.py --anomalies analysis/anomalies.json --output analysis/anomaly-classification.json
+    - python scripts/devops/anomaly-reporter.py --anomalies analysis/anomalies.json --classification analysis/anomaly-classification.json --output analysis/anomaly-report.html
+  artifacts:
+    reports:
+      junit: analysis/junit.xml
+    paths:
+      - analysis/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Alert Aggregation
+alert:aggregate:
+  stage: alert
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install slack-sdk requests
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/alert-aggregator.py --reports-dir monitoring/ --output alerts/aggregated-alerts.json
+    - python scripts/devops/alert-prioritizer.py --alerts alerts/aggregated-alerts.json --thresholds monitoring/alert-thresholds.json --output alerts/prioritized-alerts.json
+    - python scripts/devops/alert-correlation.py --alerts alerts/prioritized-alerts.json --output alerts/correlated-alerts.json
+  artifacts:
+    reports:
+      junit: alerts/junit.xml
+    paths:
+      - alerts/
+    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Alert Notification
+alert:notify:
+  stage: alert
+  image: python:3.11-slim
+  needs: [alert:aggregate]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install slack-sdk requests telegram-bot-api
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/alert-sender.py --alerts alerts/correlated-alerts.json --channels monitoring/alert-channels.json --slack-webhook $SLACK_WEBHOOK
+    - python scripts/devops/telegram-notification.py --alerts alerts/correlated-alerts.json --bot-token $TELEGRAM_BOT_TOKEN --chat-id $TELEGRAM_CHAT_ID
+    - python scripts/devops/email-notification.py --alerts alerts/correlated-alerts.json --to $NOTIFICATION_EMAIL
+  artifacts:
+    reports:
+      junit: alerts/junit.xml
+    paths:
+      - alerts/
+    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: on_failure
+    - when: manual
+      allow_failure: true
+
+# Alert Escalation
+alert:escalate:
+  stage: alert
+  image: python:3.11-slim
+  needs: [alert:notify]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/alert-escalation.py --alerts alerts/correlated-alerts.json --rules monitoring/escalation-rules.json --output alerts/escalated-alerts.json
+    - python scripts/devops/incident-creator.py --alerts alerts/escalated-alerts.json --create-issues true
+  artifacts:
+    reports:
+      junit: alerts/junit.xml
+    paths:
+      - alerts/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: on_failure
+    - when: manual
+      allow_failure: true
+
+# Automated Scaling
+automate:scaling:
+  stage: automate
+  image: python:3.11-slim
+  needs: [monitor:resources, analyze:trends]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install prometheus-client kubernetes
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/scaling-decision.py --usage monitoring/resource-usage.json --trends analysis/trends.json --thresholds monitoring/scaling-thresholds.json --output automation/scaling-decisions.json
+    - python scripts/devops/scaling-executor.py --decisions automation/scaling-decisions.json --environment $ENVIRONMENT --cloud-provider "$CLOUD_PROVIDER" --credentials "$CLOUD_CREDENTIALS"
+    - python scripts/devops/scaling-verification.py --decisions automation/scaling-decisions.json --environment $ENVIRONMENT --output automation/scaling-verification.json
+  artifacts:
+    reports:
+      junit: automation/junit.xml
+    paths:
+      - automation/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Automated Backup
+automate:backup:
+  stage: automate
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install boto3 google-cloud-storage azure-storage-blob
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/db-backup.py --environment $ENVIRONMENT --connection-string "$DB_CONNECTION_STRING" --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS"
+    - python scripts/devops/app-data-backup.py --environment $ENVIRONMENT --source-paths monitoring/backup-paths.json --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS"
+    - python scripts/devops/config-backup.py --environment $ENVIRONMENT --config-paths monitoring/config-paths.json --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS"
+    - python scripts/devops/backup-verification.py --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS"
+  artifacts:
+    reports:
+      junit: automation/junit.xml
+    paths:
+      - automation/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Automated Cleanup
+automate:cleanup:
+  stage: automate
+  image: python:3.11-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install boto3 google-cloud azure-mgmt
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/resource-cleanup.py --environment $ENVIRONMENT --cloud-provider "$CLOUD_PROVIDER" --credentials "$CLOUD_CREDENTIALS" --dry-run false
+    - python scripts/devops/log-cleanup.py --log-paths monitoring/log-paths.json --retention-days 30
+    - python scripts/devops/backup-cleanup.py --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS" --retention-days 90
+    - python scripts/devops/docker-cleanup.py --environment $ENVIRONMENT
+  artifacts:
+    reports:
+      junit: automation/junit.xml
+    paths:
+      - automation/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Automated Security
+automate:security:
+  stage: automate
+  image: python:3.11-slim
+  needs: [monitor:security, analyze:anomalies]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests cryptography
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/security-automation.py --threats monitoring/security-monitor.json --anomalies analysis/anomalies.json --output automation/security-actions.json
+    - python scripts/devops/security-response.py --actions automation/security-actions.json --environment $ENVIRONMENT --execute true
+    - python scripts/devops/security-verification.py --actions automation/security-actions.json --environment $ENVIRONMENT --output automation/security-verification.json
+  artifacts:
+    reports:
+      junit: automation/junit.xml
+    paths:
+      - automation/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: on_failure
+    - when: manual
+      allow_failure: true
+
+# Automated Recovery
+automate:recovery:
+  stage: automate
+  image: python:3.11-slim
+  needs: [monitor:health, alert:escalate]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/recovery-analyzer.py --alerts alerts/escalated-alerts.json --health monitoring/health-report.json --output automation/recovery-actions.json
+    - python scripts/devops/recovery-executor.py --actions automation/recovery-actions.json --environment $ENVIRONMENT --execute true
+    - python scripts/devops/recovery-verification.py --actions automation/recovery-actions.json --environment $ENVIRONMENT --output automation/recovery-verification.json
+  artifacts:
+    reports:
+      junit: automation/junit.xml
+    paths:
+      - automation/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: on_failure
+    - when: manual
+      allow_failure: true
+
+# Executive Report
+report:executive:
+  stage: report
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security, analyze:metrics]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install jinja2 weasyprint
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/executive-report.py --reports-dir monitoring/ --template templates/executive-report.html --output reports/executive-report.html
+    - python scripts/devops/pdf-generator.py --html-dir reports/ --output reports/pdf/
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Technical Report
+report:technical:
+  stage: report
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security, analyze:metrics]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install jinja2 weasyprint
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/technical-report.py --reports-dir monitoring/ --template templates/technical-report.html --output reports/technical-report.html
+    - python scripts/devops/pdf-generator.py --html-dir reports/ --output reports/pdf/
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Dashboard Update
+report:dashboard:
+  stage: report
+  image: python:3.11-slim
+  needs: [monitor:health, monitor:performance, monitor:security, analyze:metrics]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/dashboard-updater.py --metrics-dir monitoring/ --grafana-url $GRAFANA_URL --grafana-token $GRAFANA_TOKEN
+    - python scripts/devops/dashboard-exporter.py --grafana-url $GRAFANA_URL --grafana-token $GRAFANA_TOKEN --output reports/dashboards/
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Archive Reports
+report:archive:
+  stage: report
+  image: python:3.11-slim
+  needs: [report:executive, report:technical, report:dashboard]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install boto3
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/archive-reports.py --reports-dir reports/ --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS"
+    - python scripts/devops/cleanup-old-reports.py --storage-provider "$BACKUP_STORAGE_PROVIDER" --storage-credentials "$BACKUP_STORAGE_CREDENTIALS" --retention-days 365
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/
+    expire_in: 1 year
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true

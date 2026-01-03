@@ -1,0 +1,657 @@
+# Advanced Docker Compose Configuration for Space Invaders Microservices
+# Comprehensive microservices architecture with monitoring, logging, and scaling
+
+version: '3.8'
+
+services:
+  # Frontend Service (Flutter Web)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: space-invaders-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - NODE_ENV=production
+      - REACT_APP_API_URL=http://api:8080
+      - REACT_APP_WS_URL=ws://api:8080
+      - REACT_APP_ENV=production
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - frontend_logs:/var/log/nginx
+    depends_on:
+      - api
+      - websocket
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.frontend.rule=Host(`space-invaders.local`)"
+        - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+  # Backend API Service
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: space-invaders-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=postgresql://spaceinvaders:password@postgres:5432/spaceinvaders
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key
+      - CORS_ORIGIN=http://localhost:3000
+      - LOG_LEVEL=info
+      - METRICS_ENABLED=true
+      - METRICS_PORT=9090
+    volumes:
+      - api_logs:/app/logs
+      - api_uploads:/app/uploads
+      - api_temp:/app/temp
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.api.rule=Host(`api.space-invaders.local`)"
+        - "traefik.http.services.api.loadbalancer.server.port=8080"
+
+  # WebSocket Service
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile.websocket
+    container_name: space-invaders-websocket
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - NODE_ENV=production
+      - PORT=8081
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=your-super-secret-jwt-key
+      - LOG_LEVEL=info
+    volumes:
+      - websocket_logs:/app/logs
+    depends_on:
+      - redis
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Database Service (PostgreSQL)
+  postgres:
+    image: postgres:15-alpine
+    container_name: space-invaders-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=spaceinvaders
+      - POSTGRES_USER=spaceinvaders
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_logs:/var/log/postgresql
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spaceinvaders -d spaceinvaders"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Redis Cache Service
+  redis:
+    image: redis:7-alpine
+    container_name: space-invaders-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+      - redis_logs:/var/log/redis
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Message Queue Service (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: space-invaders-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=spaceinvaders
+      - RABBITMQ_DEFAULT_PASS=rabbitpassword
+      - RABBITMQ_DEFAULT_VHOST=spaceinvaders
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbitmq_logs:/var/log/rabbitmq
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Elasticsearch Service
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: space-invaders-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - elasticsearch_logs:/usr/share/elasticsearch/logs
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Kibana Service
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.8.0
+    container_name: space-invaders-kibana
+    restart: unless-stopped
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - "SERVER_NAME=space-invaders-kibana"
+      - "SERVER_HOST=0.0.0.0"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5601/api/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Prometheus Service
+  prometheus:
+    image: prom/prometheus:v2.40.0
+    container_name: space-invaders-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+      - prometheus_logs:/var/log/prometheus
+    depends_on:
+      - api
+      - websocket
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Grafana Service
+  grafana:
+    image: grafana/grafana:9.3.0
+    container_name: space-invaders-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_ANALYTICS_REPORTING_ENABLED=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - grafana_logs:/var/log/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Jaeger Service (Distributed Tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    container_name: space-invaders-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+      - ES_USERNAME=
+      - ES_PASSWORD=
+    depends_on:
+      - elasticsearch
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:16686/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Zipkin Service (Alternative Distributed Tracing)
+  zipkin:
+    image: openzipkin/zipkin:2.24
+    container_name: space-invaders-zipkin
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
+    environment:
+      - STORAGE_TYPE=elasticsearch
+      - ES_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9411/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: space-invaders-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/load-balancer.conf:/etc/nginx/nginx.conf:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - api
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Traefik Reverse Proxy
+  traefik:
+    image: traefik:v2.10
+    container_name: space-invaders-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "8443:8443"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:8443"
+      - "--certificatesresolvers.myresolver.acme.http=true"
+      - "--certificatesresolvers.myresolver.acme.http.entrypoint=web"
+      - "--certificatesresolvers.myresolver.acme.email=admin@space-invaders.local"
+      - "--certificatesresolvers.myresolver.acme.storage=/acme.json"
+      - "--global.checknewversion=false"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addinternals=true"
+      - "--entrypoints.metrics.address=:8082"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_logs:/var/log/traefik
+      - traefik_acme:/acme.json
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/api/overview"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Logstash Service
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.8.0
+    container_name: space-invaders-logstash
+    restart: unless-stopped
+    ports:
+      - "5044:5044"
+      - "9600:9600"
+    environment:
+      - "LS_JAVA_OPTS=-Xmx512m -Xms512m"
+    volumes:
+      - ./monitoring/logstash/pipeline.yml:/usr/share/logstash/pipeline/pipeline.yml:ro
+      - ./monitoring/logstash/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - logstash_data:/usr/share/logstash/data
+      - logstash_logs:/usr/share/logstash/logs
+    depends_on:
+      - elasticsearch
+    networks:
+      - space-invaders-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9600/_node/stats || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Filebeat Service
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.8.0
+    container_name: space-invaders-filebeat
+    restart: unless-stopped
+    user: root
+    environment:
+      - "output.elasticsearch.hosts=[\"elasticsearch:9200\"]"
+      - "setup.kibana.host=kibana:5601"
+    volumes:
+      - ./monitoring/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - api_logs:/var/log/api:ro
+      - frontend_logs:/var/log/nginx:ro
+      - postgres_logs:/var/log/postgresql:ro
+      - redis_logs:/var/log/redis:ro
+      - rabbitmq_logs:/var/log/rabbitmq:ro
+    depends_on:
+      - elasticsearch
+      - kibana
+    networks:
+      - space-invaders-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Metricbeat Service
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:8.8.0
+    container_name: space-invaders-metricbeat
+    restart: unless-stopped
+    user: root
+    environment:
+      - "output.elasticsearch.hosts=[\"elasticsearch:9200\"]"
+      - "setup.kibana.host=kibana:5601"
+    volumes:
+      - ./monitoring/metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs:ro
+    depends_on:
+      - elasticsearch
+      - kibana
+    networks:
+      - space-invaders-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+# Networks
+networks:
+  space-invaders-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes
+volumes:
+  postgres_data:
+    driver: local
+  postgres_logs:
+    driver: local
+  redis_data:
+    driver: local
+  redis_logs:
+    driver: local
+  rabbitmq_data:
+    driver: local
+  rabbitmq_logs:
+    driver: local
+  elasticsearch_data:
+    driver: local
+  elasticsearch_logs:
+    driver: local
+  grafana_data:
+    driver: local
+  grafana_logs:
+    driver: local
+  prometheus_data:
+    driver: local
+  prometheus_logs:
+    driver: local
+  logstash_data:
+    driver: local
+  logstash_logs:
+    driver: local
+  traefik_acme:
+    driver: local
+  traefik_logs:
+    driver: local
+  api_logs:
+    driver: local
+  frontend_logs:
+    driver: local
+  websocket_logs:
+    driver: local
+  api_uploads:
+    driver: local
+  api_temp:
+    driver: local

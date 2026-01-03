@@ -1,0 +1,603 @@
+# GitLab CI/CD Template for DevOps Infrastructure as Code
+# Provides comprehensive DevOps automation with IaC, monitoring, and security
+
+stages:
+  - validate
+  - plan
+  - test
+  - deploy
+  - monitor
+  - cleanup
+
+variables:
+  TF_VAR_environment: $CI_ENVIRONMENT_NAME
+  TF_VAR_project_name: "space-invaders"
+  TF_VAR_region: "ru-central1"
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+  ANSIBLE_ROLES_PATH: "ansible/roles"
+  HELM_EXPERIMENTAL_OCI: "1"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# Cache configuration
+.cache_template: &cache_configuration
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-$CI_JOB_NAME"
+    paths:
+      - .terraform/
+      - .terraform.lock.hcl
+      - ansible/roles/
+      - helm/*/charts/
+      - vendor/
+
+# Terraform validation and planning
+terraform:validate:
+  stage: validate
+  image: hashicorp/terraform:1.5.0
+  <<: *cache_configuration
+  before_script:
+    - cd terraform
+    - terraform --version
+    - terraform init -input=false
+  script:
+    - terraform fmt -check -recursive
+    - terraform validate -no-color
+  artifacts:
+    reports:
+      terraform: terraform/terraform.json
+    paths:
+      - terraform/.terraform/
+      - terraform/.terraform.lock.hcl
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "terraform/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "terraform/**"
+    - when: manual
+      allow_failure: true
+
+terraform:plan:
+  stage: plan
+  image: hashicorp/terraform:1.5.0
+  <<: *cache_configuration
+  needs: [terraform:validate]
+  before_script:
+    - cd terraform
+    - terraform init -input=false
+  script:
+    - terraform plan -input=false -out=terraform.tfplan -detailed-exitcode
+    - terraform show -json terraform.tfplan > terraform-plan.json
+  artifacts:
+    reports:
+      terraform: terraform/terraform-plan.json
+    paths:
+      - terraform/terraform.tfplan
+      - terraform/terraform-plan.json
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "terraform/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "terraform/**"
+    - when: manual
+      allow_failure: true
+
+# Ansible validation and testing
+ansible:validate:
+  stage: validate
+  image: python:3.11-slim
+  <<: *cache_configuration
+  before_script:
+    - apt-get update -qq && apt-get install -y git openssh-client
+    - pip install ansible ansible-lint molecule[testinfra] docker
+    - pip install -r ansible/requirements.txt
+  script:
+    - ansible-lint ansible/playbooks/
+    - ansible-playbook --syntax-check ansible/playbooks/*.yml
+    - molecule test -s default
+  artifacts:
+    reports:
+      junit: ansible/reports/junit.xml
+    paths:
+      - ansible/reports/
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "ansible/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "ansible/**"
+    - when: manual
+      allow_failure: true
+
+# Helm chart validation and testing
+helm:validate:
+  stage: validate
+  image: alpine/helm:3.12.0
+  <<: *cache_configuration
+  before_script:
+    - helm version
+    - helm plugin install https://github.com/quintush/helm-unittest
+  script:
+    - helm lint helm/space-invaders/
+    - helm template space-invaders helm/space-invaders/ --values helm/space-invaders/values.yaml
+    - helm unittest helm/space-invaders/
+  artifacts:
+    reports:
+      junit: helm/reports/junit.xml
+    paths:
+      - helm/reports/
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "helm/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "helm/**"
+    - when: manual
+      allow_failure: true
+
+# Docker Compose validation
+docker:validate:
+  stage: validate
+  image: docker:24.0.5-dind
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - docker compose version
+    - docker info
+  script:
+    - docker compose -f docker-compose.yml config --quiet
+    - docker compose -f docker-compose.yml pull --ignore-pull-failures
+    - docker compose -f docker-compose.yml build --no-cache
+  artifacts:
+    reports:
+      junit: docker/reports/junit.xml
+    paths:
+      - docker/reports/
+    expire_in: 1 hour
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "docker-compose*.yml"
+        - "Dockerfile*"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "docker-compose*.yml"
+        - "Dockerfile*"
+    - when: manual
+      allow_failure: true
+
+# Security scanning
+security:scan:
+  stage: validate
+  image: python:3.11-slim
+  <<: *cache_configuration
+  before_script:
+    - apt-get update -qq && apt-get install -y wget curl git
+    - pip install checkov bandit safety
+    - wget -O tfsec https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64
+    - chmod +x tfsec
+    - mv tfsec /usr/local/bin/
+    - wget -O trivy https://github.com/aquasecurity/trivy/releases/latest/download/trivy-linux-amd64
+    - chmod +x trivy
+    - mv trivy /usr/local/bin/
+  script:
+    - checkov -d terraform/ --framework terraform --output junitxml --output-file-path security/
+    - tfsec terraform/ --format junit --out security/tfsec-results.xml
+    - trivy config --format json --output security/trivy-results.json .
+    - bandit -r ansible/ -f json -o security/bandit-results.json
+    - safety check --json --output security/safety-results.json
+  artifacts:
+    reports:
+      junit: security/results.xml
+    paths:
+      - security/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Performance testing
+performance:test:
+  stage: test
+  image: python:3.11-slim
+  <<: *cache_configuration
+  before_script:
+    - apt-get update -qq && apt-get install -y curl wget
+    - pip install locust pytest pytest-html
+  script:
+    - locust -f performance/locustfile.py --headless --users 100 --spawn-rate 10 --run-time 60s --host $TARGET_URL --html performance/locust-report.html
+    - pytest performance/tests/ --html=performance/test-report.html
+  artifacts:
+    reports:
+      junit: performance/junit.xml
+    paths:
+      - performance/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Integration testing
+integration:test:
+  stage: test
+  image: docker:24.0.5-dind
+  services:
+    - docker:24.0.5-dind
+    - name: postgres:15-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: test_db
+        POSTGRES_USER: test_user
+        POSTGRES_PASSWORD: test_password
+    - name: redis:7-alpine
+      alias: redis
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+    DATABASE_URL: postgresql://test_user:test_password@postgres:5432/test_db
+    REDIS_URL: redis://redis:6379
+  before_script:
+    - docker compose version
+  script:
+    - docker compose -f docker-compose.test.yml up -d
+    - sleep 30
+    - docker compose -f docker-compose.test.yml exec -T frontend curl -f http://localhost/health
+    - docker compose -f docker-compose.test.yml exec -T api curl -f http://localhost:8080/health
+    - docker compose -f docker-compose.test.yml exec -T postgres pg_isready -U test_user -d test_db
+    - docker compose -f docker-compose.test.yml exec -T redis redis-cli ping
+  after_script:
+    - docker compose -f docker-compose.test.yml down --remove-orphans
+  artifacts:
+    reports:
+      junit: integration/junit.xml
+    paths:
+      - integration/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+      allow_failure: true
+
+# Terraform apply (production only)
+terraform:apply:
+  stage: deploy
+  image: hashicorp/terraform:1.5.0
+  <<: *cache_configuration
+  needs: [terraform:plan]
+  environment:
+    name: production
+    url: https://$TF_VAR_project_name.$TF_VAR_environment.example.com
+  before_script:
+    - cd terraform
+    - terraform init -input=false
+  script:
+    - terraform apply -input=false -auto-approve terraform.tfplan
+    - terraform output -json > terraform-outputs.json
+  artifacts:
+    reports:
+      terraform: terraform/terraform-outputs.json
+    paths:
+      - terraform/terraform-outputs.json
+    expire_in: 1 month
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "terraform/**"
+    - when: manual
+      allow_failure: false
+
+# Ansible deployment
+ansible:deploy:
+  stage: deploy
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [terraform:apply]
+  environment:
+    name: production
+    url: https://space-invaders.production.example.com
+  before_script:
+    - apt-get update -qq && apt-get install -y openssh-client
+    - pip install ansible ansible-lint
+    - pip install -r ansible/requirements.txt
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan $ANSIBLE_HOST >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+  script:
+    - ansible-playbook -i ansible/inventory/production ansible/playbooks/deploy-space-invaders.yml
+    - ansible-playbook -i ansible/inventory/production ansible/playbooks/monitoring-maintenance.yml
+  artifacts:
+    reports:
+      junit: ansible/reports/junit.xml
+    paths:
+      - ansible/reports/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "ansible/**"
+    - when: manual
+      allow_failure: false
+
+# Helm deployment
+helm:deploy:
+  stage: deploy
+  image: alpine/helm:3.12.0
+  <<: *cache_configuration
+  needs: [terraform:apply]
+  environment:
+    name: production
+    url: https://space-invaders.production.example.com
+  before_script:
+    - helm version
+    - kubectl config use-context $KUBE_CONTEXT
+    - helm repo add bitnami https://charts.bitnami.com/bitnami
+    - helm repo update
+  script:
+    - cd helm/space-invaders
+    - helm dependency build
+    - helm upgrade --install space-invaders . --values values-production.yaml --wait --timeout=600s
+    - helm test space-invaders
+  artifacts:
+    reports:
+      junit: helm/reports/junit.xml
+    paths:
+      - helm/reports/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "helm/**"
+    - when: manual
+      allow_failure: false
+
+# Monitoring setup
+monitoring:setup:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [ansible:deploy, helm:deploy]
+  environment:
+    name: production
+    url: https://space-invaders.production.example.com
+  before_script:
+    - apt-get update -qq && apt-get install -y curl wget
+    - pip install requests prometheus-client grafana-api
+    - pip install -r requirements.txt
+  script:
+    - python scripts/devops/monitoring-setup.py --environment production
+    - python scripts/devops/alert-setup.py --environment production
+    - python scripts/devops/dashboard-setup.py --environment production
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Health monitoring
+monitoring:health:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:setup]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests
+  script:
+    - python scripts/devops/health-monitor.py --environment production --output monitoring/health-report.json
+    - curl -f https://space-invaders.production.example.com/health
+    - curl -f https://api.space-invaders.production.example.com/health
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 day
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Performance monitoring
+monitoring:performance:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:setup]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests matplotlib pandas
+  script:
+    - python scripts/devops/performance-monitor.py --environment production --duration 300 --output monitoring/performance-report.json
+    - python scripts/devops/load-test.py --target https://space-invaders.production.example.com --users 50 --duration 60
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Security monitoring
+monitoring:security:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:setup]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl wget
+    - pip install requests cryptography
+    - wget -O trivy https://github.com/aquasecurity/trivy/releases/latest/download/trivy-linux-amd64
+    - chmod +x trivy
+    - mv trivy /usr/local/bin/
+  script:
+    - python scripts/devops/security-monitor.py --environment production --output monitoring/security-report.json
+    - trivy image --format json --output monitoring/container-security.json spaceinvaders/space-invaders:latest
+    - python scripts/devops/vulnerability-scan.py --environment production
+  artifacts:
+    reports:
+      junit: monitoring/junit.xml
+    paths:
+      - monitoring/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Backup automation
+backup:automated:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:setup]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests boto3
+  script:
+    - python scripts/devops/backup-automation.py --environment production
+    - python scripts/devops/backup-verification.py --environment production
+  artifacts:
+    reports:
+      junit: backup/junit.xml
+    paths:
+      - backup/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Resource cleanup
+cleanup:resources:
+  stage: cleanup
+  image: python:3.11-slim
+  <<: *cache_configuration
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests boto3
+  script:
+    - python scripts/devops/resource-cleanup.py --environment production --dry-run false
+    - python scripts/devops/log-cleanup.py --environment production --retention-days 30
+    - python scripts/devops/backup-cleanup.py --environment production --retention-days 90
+  artifacts:
+    reports:
+      junit: cleanup/junit.xml
+    paths:
+      - cleanup/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Compliance monitoring
+compliance:monitor:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:setup]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install requests cryptography
+  script:
+    - python scripts/devops/gdpr-compliance-check.py --environment production
+    - python scripts/devops/security-standards-check.py --environment production
+    - python scripts/devops/data-privacy-audit.py --environment production
+  artifacts:
+    reports:
+      junit: compliance/junit.xml
+    paths:
+      - compliance/
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Report generation
+reports:generate:
+  stage: monitor
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [monitoring:health, monitoring:performance, monitoring:security]
+  before_script:
+    - apt-get update -qq && apt-get install -y curl
+    - pip install jinja2 weasyprint
+  script:
+    - python scripts/devops/executive-report.py --reports-dir monitoring/ --template templates/executive-report.html --output reports/executive-report.html
+    - python scripts/devops/technical-report.py --reports-dir monitoring/ --template templates/technical-report.html --output reports/technical-report.html
+    - python scripts/devops/pdf-generator.py --html-dir reports/ --output reports/pdf/
+  artifacts:
+    reports:
+      junit: reports/junit.xml
+    paths:
+      - reports/
+    expire_in: 1 month
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: manual
+      allow_failure: true
+
+# Notification
+notification:slack:
+  stage: monitor
+  image: python:3.11-slim
+  needs: [monitoring:health, monitoring:performance, monitoring:security]
+  before_script:
+    - pip install slack-sdk requests
+  script:
+    - python scripts/devops/slack-notification.py --pipeline-id $CI_PIPELINE_ID --status $CI_JOB_STATUS
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: on_failure
+    - when: manual
+      allow_failure: true
+
+# Email notification
+notification:email:
+  stage: monitor
+  image: python:3.11-slim
+  needs: [monitoring:health, monitoring:performance, monitoring:security]
+  before_script:
+    - pip install requests
+  script:
+    - python scripts/devops/email-notification.py --pipeline-id $CI_PIPELINE_ID --status $CI_JOB_STATUS --to $NOTIFICATION_EMAIL
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
+    - when: on_failure
+    - when: manual
+      allow_failure: true

@@ -1,0 +1,505 @@
+name: Advanced Release Management and Versioning
+
+on:
+  push:
+    branches: [ main, develop, release/* ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, release/* ]
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+        - patch
+        - minor
+        - major
+        - prerelease
+        - build
+      target_branch:
+        description: 'Target branch'
+        required: true
+        default: 'main'
+        type: choice
+        options:
+        - main
+        - develop
+        - release
+      create_release:
+        description: 'Create GitHub release'
+        required: true
+        default: true
+        type: boolean
+      deploy_to_production:
+        description: 'Deploy to production'
+        required: true
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '18'
+  FLUTTER_VERSION: '3.16.0'
+  RELEASE_TYPE: ${{ github.event.inputs.release_type || 'auto' }}
+  TARGET_BRANCH: ${{ github.event.inputs.target_branch || 'main' }}
+  CREATE_RELEASE: ${{ github.event.inputs.create_release || 'false' }}
+  DEPLOY_TO_PRODUCTION: ${{ github.event.inputs.deploy_to_production || 'false' }}
+
+jobs:
+  # Version Analysis and Bumping
+  version-management:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      previous_version: ${{ steps.version.outputs.previous_version }}
+      release_type: ${{ steps.version.outputs.release_type }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Install semantic-release tools
+      run: |
+        npm install -g semantic-release
+        npm install -g @semantic-release/changelog
+        npm install -g @semantic-release/git
+        npm install -g conventional-changelog-cli
+
+    - name: Analyze commits and determine version
+      id: version
+      run: |
+        echo "🔍 Analyzing commits for version bump..."
+        
+        # Get current version from pubspec.yaml
+        CURRENT_VERSION=$(grep 'version:' pubspec.yaml | awk '{print $2}')
+        echo "Current version: $CURRENT_VERSION"
+        
+        # Determine release type based on commits or input
+        if [[ "${{ env.RELEASE_TYPE }}" != "auto" ]]; then
+          RELEASE_TYPE="${{ env.RELEASE_TYPE }}"
+        else
+          # Analyze commit messages for conventional commits
+          if git log --oneline -1 | grep -q "feat"; then
+            RELEASE_TYPE="minor"
+          elif git log --oneline -1 | grep -q "fix"; then
+            RELEASE_TYPE="patch"
+          elif git log --oneline -1 | grep -q "BREAKING CHANGE"; then
+            RELEASE_TYPE="major"
+          else
+            RELEASE_TYPE="patch"
+          fi
+        fi
+        
+        echo "Determined release type: $RELEASE_TYPE"
+        echo "release_type=$RELEASE_TYPE" >> $GITHUB_OUTPUT
+        
+        # Calculate new version
+        IFS='.' read -ra VERSION_PARTS <<< "$CURRENT_VERSION"
+        MAJOR=${VERSION_PARTS[0]}
+        MINOR=${VERSION_PARTS[1]}
+        PATCH=${VERSION_PARTS[2]}
+        
+        case $RELEASE_TYPE in
+          "major")
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+          "minor")
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+          "patch")
+            PATCH=$((PATCH + 1))
+            ;;
+          "prerelease")
+            PATCH=$((PATCH + 1))
+            PRERELEASE="beta.$PATCH"
+            ;;
+        esac
+        
+        if [[ "$RELEASE_TYPE" == "prerelease" ]]; then
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH-$PRERELEASE"
+          IS_PRERELEASE="true"
+        else
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          IS_PRERELEASE="false"
+        fi
+        
+        echo "New version: $NEW_VERSION"
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "previous_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        echo "📝 Generating changelog..."
+        
+        # Generate changelog from git commits
+        CHANGELOG=$(conventional-changelog -p angular -i CHANGELOG.md -s)
+        
+        # Extract recent changes
+        RECENT_CHANGES=$(git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0)..HEAD)
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "## What's Changed" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "$RECENT_CHANGES" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.version.outputs.previous_version }}...v${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Update version in pubspec.yaml
+      run: |
+        echo "📦 Updating version in pubspec.yaml..."
+        sed -i "s/version: .*/version: ${{ steps.version.outputs.version }}/" pubspec.yaml
+        
+        # Commit version bump
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add pubspec.yaml
+        git commit -m "chore(release): bump version to ${{ steps.version.outputs.version }}"
+        
+        # Push version bump
+        if [[ "${{ env.TARGET_BRANCH }}" == "main" ]]; then
+          git push origin main
+        elif [[ "${{ env.TARGET_BRANCH }}" == "develop" ]]; then
+          git push origin develop
+        fi
+
+  # Build and Test Release Artifacts
+  build-release:
+    runs-on: ${{ matrix.os }}
+    needs: version-management
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            artifact_name: space-invaders-linux
+            asset_name: space-invaders-linux.zip
+          - os: windows-latest
+            platform: windows
+            artifact_name: space-invaders-windows.exe
+            asset_name: space-invaders-windows.zip
+          - os: macos-latest
+            platform: macos
+            artifact_name: space-invaders-macos
+            asset_name: space-invaders-macos.zip
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: ${{ env.FLUTTER_VERSION }}
+        channel: 'stable'
+
+    - name: Install dependencies
+      run: |
+        flutter pub get
+
+    - name: Build for ${{ matrix.platform }}
+      run: |
+        case "${{ matrix.platform }}" in
+          "linux")
+            flutter build linux --release
+            mkdir -p release
+            cp -r build/linux/*/release/bundle/* release/
+            cd release && zip -r ../${{ matrix.asset_name }} .
+            ;;
+          "windows")
+            flutter build windows --release
+            mkdir -p release
+            cp -r build/windows/runner/Release/* release/
+            cd release && 7z a ../${{ matrix.asset_name }} .
+            ;;
+          "macos")
+            flutter build macos --release
+            mkdir -p release
+            cp -r build/macos/Build/Products/Release/space_invaders.app release/
+            cd release && zip -r ../${{ matrix.asset_name }} .
+            ;;
+        esac
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.platform }}-release
+        path: ${{ matrix.asset_name }}
+        retention-days: 30
+
+  # Create GitHub Release
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [version-management, build-release]
+    if: (github.event_name == 'workflow_dispatch' && env.CREATE_RELEASE == 'true') || startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+      releases: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ needs.version-management.outputs.version }}
+        release_name: Space Invaders v${{ needs.version-management.outputs.version }}
+        body: |
+          ${{ needs.version-management.outputs.changelog }}
+          
+          ## 📦 Downloads
+          
+          | Platform | Download |
+          |----------|----------|
+          | Linux | [space-invaders-linux.zip](artifacts/linux-release/space-invaders-linux.zip) |
+          | Windows | [space-invaders-windows.zip](artifacts/windows-release/space-invaders-windows.zip) |
+          | macOS | [space-invaders-macos.zip](artifacts/macos-release/space-invaders-macos.zip) |
+          
+          ## 🔧 Installation
+          
+          ### Linux
+          1. Download `space-invaders-linux.zip`
+          2. Extract the archive
+          3. Run `./space_invaders`
+          
+          ### Windows
+          1. Download `space-invaders-windows.zip`
+          2. Extract the archive
+          3. Run `space_invaders.exe`
+          
+          ### macOS
+          1. Download `space-invaders-macos.zip`
+          2. Extract the archive
+          3. Run `Space Invaders.app`
+          
+          ## 🐛 Bug Reports
+          
+          Please report any issues on our [GitHub Issues](https://github.com/${{ github.repository }}/issues) page.
+          
+          ---
+          
+          **SHA256 Checksums:**
+          ```bash
+          # Linux
+          sha256sum space-invaders-linux.zip
+          
+          # Windows  
+          sha256sum space-invaders-windows.zip
+          
+          # macOS
+          sha256sum space-invaders-macos.zip
+          ```
+        draft: false
+        prerelease: ${{ needs.version-management.outputs.is_prerelease }}
+
+    - name: Upload release assets
+      run: |
+        for platform in linux windows macos; do
+          echo "Uploading $platform release asset..."
+          gh release upload v${{ needs.version-management.outputs.version }} \
+            artifacts/$platform-release/space-invaders-$platform.zip \
+            --clobber
+        done
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [version-management, build-release, create-release]
+    if: (github.event_name == 'workflow_dispatch' && env.DEPLOY_TO_PRODUCTION == 'true') || startsWith(github.ref, 'refs/tags/')
+    environment: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-release
+        path: deploy
+
+    - name: Deploy to production servers
+      run: |
+        echo "🚀 Deploying to production..."
+        
+        # Example deployment script - customize for your infrastructure
+        # This is a placeholder for your actual deployment process
+        
+        # Deploy to web servers
+        # scp deploy/* user@production-server:/path/to/deploy/
+        
+        # Update services
+        # ssh user@production-server "systemctl restart space-invaders"
+        
+        # Update load balancer
+        # curl -X POST https://load-balancer/api/reload
+        
+        echo "✅ Deployment completed successfully!"
+
+    - name: Notify deployment status
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        text: |
+          🚀 **Production Deployment Status: ${{ job.status }}**
+          
+          **Version:** v${{ needs.version-management.outputs.version }}
+          **Repository:** ${{ github.repository }}
+          **Commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref }}
+          
+          ${{ job.status == 'success' && '✅ Deployment completed successfully!' || '❌ Deployment failed!' }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Update Documentation
+  update-documentation:
+    runs-on: ubuntu-latest
+    needs: [version-management, create-release]
+    if: always() && needs.create-release.result == 'success'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Update documentation
+      run: |
+        echo "📚 Updating documentation..."
+        
+        # Update version in documentation
+        sed -i "s/CURRENT_VERSION/${{ needs.version-management.outputs.version }}/g" README.md
+        sed -i "s/LATEST_VERSION/${{ needs.version-management.outputs.version }}/g" docs/API.md
+        
+        # Update changelog
+        echo "" >> CHANGELOG.md
+        echo "## [${{ needs.version-management.outputs.version }}] - $(date +%Y-%m-%d)" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "${{ needs.version-management.outputs.changelog }}" >> CHANGELOG.md
+        
+        # Commit documentation updates
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md docs/API.md CHANGELOG.md
+        git commit -m "docs: update documentation for v${{ needs.version-management.outputs.version }}"
+        git push origin main
+
+  # Post-Release Analysis
+  post-release-analysis:
+    runs-on: ubuntu-latest
+    needs: [version-management, build-release, create-release, deploy-production]
+    if: always()
+
+    steps:
+    - name: Generate release report
+      run: |
+        echo "📊 Generating release report..."
+        
+        cat > release-report.md << EOF
+        # Release Report
+        
+        ## Release Information
+        - **Version:** v${{ needs.version-management.outputs.version }}
+        - **Previous Version:** v${{ needs.version-management.outputs.previous_version }}
+        - **Release Type:** ${{ needs.version-management.outputs.release_type }}
+        - **Prerelease:** ${{ needs.version-management.outputs.is_prerelease }}
+        - **Repository:** ${{ github.repository }}
+        - **Commit:** ${{ github.sha }}
+        - **Branch:** ${{ github.ref }}
+        
+        ## Build Status
+        - **Version Management:** ${{ needs.version-management.result }}
+        - **Build Release:** ${{ needs.build-release.result }}
+        - **Create Release:** ${{ needs.create-release.result }}
+        - **Deploy Production:** ${{ needs.deploy-production.result }}
+        
+        ## Artifacts Created
+        - Linux Release: ${{ needs.build-release.result == 'success' && '✅ Created' || '❌ Failed' }}
+        - Windows Release: ${{ needs.build-release.result == 'success' && '✅ Created' || '❌ Failed' }}
+        - macOS Release: ${{ needs.build-release.result == 'success' && '✅ Created' || '❌ Failed' }}
+        
+        ## Deployment Status
+        - **Production Deploy:** ${{ needs.deploy-production.result == 'success' && '✅ Deployed' || '❌ Failed' }}
+        
+        ## Changelog
+        ${{ needs.version-management.outputs.changelog }}
+        
+        ---
+        *Report generated on $(date)*
+        EOF
+
+    - name: Upload release report
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-report
+        path: release-report.md
+        retention-days: 90
+
+    - name: Create release summary issue
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🚨 Release Issues Detected - v${{ needs.version-management.outputs.version }}`,
+            body: `## Release Issues
+            
+            **Version:** v${{ needs.version-management.outputs.version }}
+            **Repository:** ${context.repo.owner}/${context.repo.repo}
+            **Commit:** ${context.sha}
+            **Branch:** ${context.ref}
+            
+            ### Failed Jobs
+            Please review the failed jobs and address the issues:
+            
+            - Version Management: ${{ needs.version-management.result }}
+            - Build Release: ${{ needs.build-release.result }}
+            - Create Release: ${{ needs.create-release.result }}
+            - Deploy Production: ${{ needs.deploy-production.result }}
+            
+            ### Actions Required
+            1. Review the workflow logs for failed jobs
+            2. Address any build or deployment issues
+            3. Manually complete the release process if necessary
+            4. Update documentation if version was bumped
+            
+            ### Workflow URL
+            [View Workflow Run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ---
+            *This issue was automatically created due to release process failures.*`,
+            labels: ['release', 'failed', 'automated']
+          })

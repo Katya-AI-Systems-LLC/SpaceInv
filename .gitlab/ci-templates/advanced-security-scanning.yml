@@ -1,0 +1,81 @@
+# Advanced Security Scanning Template
+# GitLab CI/CD template for comprehensive security scanning
+
+stages:
+  - security-sast
+  - security-dast
+  - security-container
+  - security-dependencies
+  - security-report
+
+variables:
+  SECURITY_LEVEL: "standard"
+  SCAN_TIMEOUT: "300"
+
+# SAST - Static Application Security Testing
+sast_scan:
+  stage: security-sast
+  image: python:3.11
+  script:
+    - pip install bandit safety semgrep
+    - bandit -r lib/ -f json -o bandit-report.json || true
+    - safety check --json --output safety-report.json || true
+    - semgrep --config=auto --json --output=semgrep-report.json lib/ || true
+  artifacts:
+    paths:
+      - bandit-report.json
+      - safety-report.json
+      - semgrep-report.json
+    expire_in: 1 week
+
+# Container Security Scanning
+container_security:
+  stage: security-container
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  script:
+    - docker build -t $CI_PROJECT_NAME:$CI_COMMIT_SHA .
+    - trivy image --format json --output trivy-report.json $CI_PROJECT_NAME:$CI_COMMIT_SHA || true
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 1 week
+
+# Security Report Generation
+security_report:
+  stage: security-report
+  image: python:3.11
+  dependencies:
+    - sast_scan
+    - container_security
+  script:
+    - python3 -c "
+import json
+import os
+from datetime import datetime
+
+report = {
+    'scan_date': datetime.now().isoformat(),
+    'project': '$CI_PROJECT_NAME',
+    'commit': '$CI_COMMIT_SHA',
+    'findings': {}
+}
+
+if os.path.exists('bandit-report.json'):
+    with open('bandit-report.json', 'r') as f:
+        bandit_data = json.load(f)
+        report['findings']['bandit'] = len(bandit_data.get('results', []))
+
+if os.path.exists('trivy-report.json'):
+    with open('trivy-report.json', 'r') as f:
+        trivy_data = json.load(f)
+        report['findings']['trivy'] = len(trivy_data.get('Results', [{}])[0].get('Vulnerabilities', []))
+
+with open('security-report.json', 'w') as f:
+    json.dump(report, f, indent=2)
+"
+  artifacts:
+    paths:
+      - security-report.json
+    expire_in: 1 month

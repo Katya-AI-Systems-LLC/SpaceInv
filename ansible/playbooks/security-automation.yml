@@ -1,0 +1,664 @@
+---
+# Ansible Playbook for DevOps Security Automation
+# Provides comprehensive security monitoring, scanning, and compliance
+
+- name: DevOps Security Automation
+  hosts: all
+  become: yes
+  vars:
+    devops_user: devops
+    devops_home: /opt/devops
+    environment: "{{ lookup('env', 'ENVIRONMENT') | default('production') }}"
+    domain: "{{ lookup('env', 'DOMAIN') | default('devops.local') }}"
+    
+    # Security configuration
+    security_enabled: "{{ lookup('env', 'SECURITY_ENABLED') | default('true') }}"
+    scanning_enabled: "{{ lookup('env', 'SCANNING_ENABLED') | default('true') }}"
+    compliance_enabled: "{{ lookup('env', 'COMPLIANCE_ENABLED') | default('true') }}"
+    
+    # Paths
+    config_path: "{{ devops_home }}/config"
+    data_path: "{{ devops_home }}/data"
+    logs_path: "{{ devops_home }}/logs"
+    scripts_path: "{{ devops_home }}/scripts"
+    security_path: "{{ devops_home }}/security"
+    
+    # Security thresholds
+    vulnerability_threshold: "HIGH,CRITICAL"
+    compliance_standards: ["GDPR", "SOC2", "ISO27001", "PCI-DSS"]
+    scan_frequency: "{{ lookup('env', 'SCAN_FREQUENCY') | default('daily') }}"
+
+  tasks:
+    # Security Setup
+    - name: Create security directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+      loop:
+        - "{{ security_path }}"
+        - "{{ security_path }}/scans"
+        - "{{ security_path}/reports"
+        - "{{ security_path}/policies"
+        - "{{ security_path}/certificates"
+        - "{{ security_path}/keys"
+        - "{{ security_path}/logs"
+        - "{{ security_path}/backups"
+    
+    # Vulnerability Scanning
+    - name: Create vulnerability scanning script
+      template:
+        src: vulnerability-scanner.py.j2
+        dest: "{{ scripts_path }}/vulnerability-scanner.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create container scanning script
+      template:
+        src: container-scanner.py.j2
+        dest: "{{ scripts_path }}/container-scanner.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create dependency scanning script
+      template:
+        src: dependency-scanner.py.j2
+        dest: "{{ scripts_path }}/dependency-scanner.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create code scanning script
+      template:
+        src: code-scanner.py.j2
+        dest: "{{ scripts_path }}/code-scanner.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup vulnerability scanning cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "vulnerability-scanner", script: "vulnerability-scanner.py", minute: "0", hour: "2" }
+        - { name: "container-scanner", script: "container-scanner.py", minute: "0", hour: "3" }
+        - { name: "dependency-scanner", script: "dependency-scanner.py", minute: "0", hour: "4" }
+        - { name: "code-scanner", script: "code-scanner.py", minute: "0", hour: "5" }
+    
+    # Security Monitoring
+    - name: Create security monitoring script
+      template:
+        src: security-monitor.py.j2
+        dest: "{{ scripts_path }}/security-monitor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create intrusion detection script
+      template:
+        src: intrusion-detect.py.j2
+        dest: "{{ scripts_path }}/intrusion-detect.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create threat detection script
+      template:
+        src: threat-detect.py.j2
+        dest: "{{ scripts_path }}/threat-detect.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create anomaly detection script
+      template:
+        src: anomaly-detect.py.j2
+        dest: "{{ scripts_path }}/anomaly-detect.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup security monitoring cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "security-monitor", script: "security-monitor.py", minute: "*/1" }
+        - { name: "intrusion-detect", script: "intrusion-detect.py", minute: "*/2" }
+        - { name: "threat-detect", script: "threat-detect.py", minute: "*/5" }
+        - { name: "anomaly-detect", script: "anomaly-detect.py", minute: "*/10" }
+    
+    # Access Control
+    - name: Create access control monitoring script
+      template:
+        src: access-control-monitor.py.j2
+        dest: "{{ scripts_path }}/access-control-monitor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create privilege monitoring script
+      template:
+        src: privilege-monitor.py.j2
+        dest: "{{ scripts_path }}/privilege-monitor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create authentication monitoring script
+      template:
+        src: auth-monitor.py.j2
+        dest: "{{ scripts_path }}/auth-monitor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup access control monitoring cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "access-control-monitor", script: "access-control-monitor.py", minute: "*/5" }
+        - { name: "privilege-monitor", script: "privilege-monitor.py", minute: "*/10" }
+        - { name: "auth-monitor", script: "auth-monitor.py", minute: "*/2" }
+    
+    # Compliance Checking
+    - name: Create compliance checker script
+      template:
+        src: compliance-checker.py.j2
+        dest: "{{ scripts_path }}/compliance-checker.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create GDPR compliance script
+      template:
+        src: gdpr-compliance.py.j2
+        dest: "{{ scripts_path }}/gdpr-compliance.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create SOC2 compliance script
+      template:
+        src: soc2-compliance.py.j2
+        dest: "{{ scripts_path }}/soc2-compliance.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create ISO27001 compliance script
+      template:
+        src: iso27001-compliance.py.j2
+        dest: "{{ scripts_path }}/iso27001-compliance.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create PCI-DSS compliance script
+      template:
+        src: pci-dss-compliance.py.j2
+        dest: "{{ scripts_path }}/pci-dss-compliance.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup compliance checking cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        day: "{{ item.day }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "compliance-checker", script: "compliance-checker.py", minute: "0", hour: "6" }
+        - { name: "gdpr-compliance", script: "gdpr-compliance.py", minute: "0", hour: "7" }
+        - { name: "soc2-compliance", script: "soc2-compliance.py", minute: "0", hour: "8" }
+        - { name: "iso27001-compliance", script: "iso27001-compliance.py", minute: "0", hour: "9" }
+        - { name: "pci-dss-compliance", script: "pci-dss-compliance.py", minute: "0", hour: "10" }
+    
+    # Certificate Management
+    - name: Create certificate monitoring script
+      template:
+        src: certificate-monitor.py.j2
+        dest: "{{ scripts_path }}/certificate-monitor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create certificate renewal script
+      template:
+        src: certificate-renewal.py.j2
+        dest: "{{ scripts_path }}/certificate-renewal.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create certificate validation script
+      template:
+        src: certificate-validator.py.j2
+        dest: "{{ scripts_path }}/certificate-validator.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup certificate management cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "certificate-monitor", script: "certificate-monitor.py", minute: "*/30" }
+        - { name: "certificate-renewal", script: "certificate-renewal.py", minute: "0", hour: "2" }
+        - { name: "certificate-validator", script: "certificate-validator.py", minute: "0", hour: "3" }
+    
+    # Security Policy Management
+    - name: Create policy validator script
+      template:
+        src: policy-validator.py.j2
+        dest: "{{ scripts_path }}/policy-validator.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create policy enforcer script
+      template:
+        src: policy-enforcer.py.j2
+        dest: "{{ scripts_path }}/policy-enforcer.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create policy auditor script
+      template:
+        src: policy-auditor.py.j2
+        dest: "{{ scripts_path }}/policy-auditor.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup policy management cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "policy-validator", script: "policy-validator.py", minute: "*/15" }
+        - { name: "policy-enforcer", script: "policy-enforcer.py", minute: "*/10" }
+        - { name: "policy-auditor", script: "policy-auditor.py", minute: "0", hour: "5" }
+    
+    # Security Reporting
+    - name: Create security report generator script
+      template:
+        src: security-reporter.py.j2
+        dest: "{{ scripts_path }}/security-reporter.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create vulnerability report script
+      template:
+        src: vulnerability-reporter.py.j2
+        dest: "{{ scripts_path }}/vulnerability-reporter.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create compliance report script
+      template:
+        src: compliance-reporter.py.j2
+        dest: "{{ scripts_path }}/compliance-reporter.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup security reporting cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        hour: "{{ item.hour }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "security-reporter", script: "security-reporter.py", minute: "0", hour: "8" }
+        - { name: "vulnerability-reporter", script: "vulnerability-reporter.py", minute: "0", hour: "9" }
+        - { name: "compliance-reporter", script: "compliance-reporter.py", minute: "0", hour: "10" }
+    
+    # Incident Response
+    - name: Create incident detection script
+      template:
+        src: incident-detect.py.j2
+        dest: "{{ scripts_path }}/incident-detect.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create incident response script
+      template:
+        src: incident-response.py.j2
+        dest: "{{ scripts_path }}/incident-response.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create incident escalation script
+      template:
+        src: incident-escalator.py.j2
+        dest: "{{ scripts_path }}/incident-escalator.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup incident response cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "incident-detect", script: "incident-detect.py", minute: "*/1" }
+        - { name: "incident-response", script: "incident-response.py", minute: "*/2" }
+        - { name: "incident-escalator", script: "incident-escalator.py", minute: "*/5" }
+    
+    # Security Automation
+    - name: Create security automation script
+      template:
+        src: security-automation.py.j2
+        dest: "{{ scripts_path }}/security-automation.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create automated response script
+      template:
+        src: automated-response.py.j2
+        dest: "{{ scripts_path }}/automated-response.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create remediation script
+      template:
+        src: remediation.py.j2
+        dest: "{{ scripts_path }}/remediation.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Setup security automation cron jobs
+      cron:
+        name: "{{ item.name }}"
+        job: "{{ scripts_path }}/{{ item.script }}"
+        minute: "{{ item.minute }}"
+        user: "{{ devops_user }}"
+      loop:
+        - { name: "security-automation", script: "security-automation.py", minute: "*/3" }
+        - { name: "automated-response", script: "automated-response.py", minute: "*/5" }
+        - { name: "remediation", script: "remediation.py", minute: "0", hour: "6" }
+    
+    # Security Service
+    - name: Create security service script
+      template:
+        src: security-service.py.j2
+        dest: "{{ scripts_path }}/security-service.py"
+        mode: '0755'
+        owner: "{{ devops_user }}"
+        group: devops
+    
+    - name: Create security service systemd unit
+      template:
+        src: security-service.service.j2
+        dest: "/etc/systemd/system/devops-security.service"
+        mode: '0644'
+        owner: root
+        group: root
+    
+    - name: Start and enable security service
+      systemd:
+        name: devops-security
+        state: started
+        enabled: yes
+        daemon_reload: yes
+    
+    # Security Configuration Files
+    - name: Create security policies
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ security_path }}/policies/{{ item.dest }}"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: devops
+      loop:
+        - { src: "security-policy.rego.j2", dest: "security-policy.rego" }
+        - { src: "access-policy.rego.j2", dest: "access-policy.rego" }
+        - { src: "compliance-policy.rego.j2", dest: "compliance-policy.rego" }
+    
+    - name: Create security configuration
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ config_path }}/{{ item.dest }}"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: devops
+      loop:
+        - { src: "security-config.yml.j2", dest: "security-config.yml" }
+        - { src: "compliance-config.yml.j2", dest: "compliance-config.yml" }
+        - { src: "scanning-config.yml.j2", dest: "scanning-config.yml" }
+    
+    # Security Documentation
+    - name: Create security documentation
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ config_path }}/{{ item.dest }}"
+        mode: '0644'
+        owner: "{{ devops_user }}"
+        group: devops
+      loop:
+        - { src: "SECURITY.md.j2", dest: "SECURITY.md" }
+        - { src: "SECURITY-POLICIES.md.j2", dest: "SECURITY-POLICIES.md" }
+        - { src: "INCIDENT-RESPONSE.md.j2", dest: "INCIDENT-RESPONSE.md" }
+        - { src: "COMPLIANCE.md.j2", dest: "COMPLIANCE.md" }
+    
+    # Security Tools Installation
+    - name: Install security tools
+      package:
+        name:
+          - fail2ban
+          - ufw
+          - auditd
+          - rkhunter
+          - chkrootkit
+          - lynis
+          - clamav
+          - clamav-freshclam
+          - openssh-server
+          - openssl
+        state: present
+      when: ansible_os_family == "Debian"
+    
+    - name: Install Python security packages
+      pip:
+        name:
+          - bandit
+          - safety
+          - semgrep
+          - trivy-python
+          - pyopenssl
+          - cryptography
+          - requests
+          - python-dateutil
+        state: present
+    
+    - name: Install security scanning tools
+      get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.dest }}"
+        mode: '0755'
+      loop:
+        - { url: "https://github.com/aquasecurity/trivy/releases/latest/download/trivy_linux_amd64", dest: "/usr/local/bin/trivy" }
+        - { url: "https://github.com/falcosecurity/falco/releases/latest/download/falco_linux_amd64", dest: "/usr/local/bin/falco" }
+        - { url: "https://github.com/open-policy-agent/opa/releases/latest/download/opa_linux_amd64", dest: "/usr/local/bin/opa" }
+    
+    # Security Configuration
+    - name: Configure fail2ban
+      template:
+        src: fail2ban-security.j2
+        dest: "/etc/fail2ban/jail.local"
+        mode: '0644'
+        owner: root
+        group: root
+      notify: restart fail2ban
+      when: ansible_os_family == "Debian"
+    
+    - name: Configure UFW firewall
+      ufw:
+        state: enabled
+        policy: deny
+        rule: allow
+        name: OpenSSH
+        port: 22
+        proto: tcp
+      when: ansible_os_family == "Debian"
+    
+    - name: Configure auditd
+      template:
+        src: auditd-security.rules.j2
+        dest: "/etc/audit/rules/security.rules"
+        mode: '0644'
+        owner: root
+        group: root
+      notify: restart auditd
+      when: ansible_os_family == "Debian"
+    
+    # Health Checks
+    - name: Verify security scripts are executable
+      command: "find {{ scripts_path }} -name '*security*.py' -executable"
+      register: security_scripts
+    
+    - name: Verify security service is running
+      systemd:
+        name: devops-security
+        state: started
+        enabled: yes
+    
+    - name: Run initial security scan
+      command: "{{ scripts_path }}/vulnerability-scanner.py"
+      become_user: "{{ devops_user }}"
+      register: security_scan
+    
+    - name: Run initial compliance check
+      command: "{{ scripts_path }}/compliance-checker.py"
+      become_user: "{{ devops_user }}"
+      register: compliance_check
+    
+    - name: Display security setup summary
+      debug:
+        msg:
+          - "DevOps security automation setup completed successfully!"
+          - "Environment: {{ environment }}"
+          - "Domain: {{ domain }}"
+          - "DevOps user: {{ devops_user }}"
+          - "Security enabled: {{ security_enabled }}"
+          - "Scanning enabled: {{ scanning_enabled }}"
+          - "Compliance enabled: {{ compliance_enabled }}"
+          - "Security path: {{ security_path }}"
+          - "Scripts path: {{ scripts_path }}"
+          - "Security service: devops-security"
+          - "Vulnerability threshold: {{ vulnerability_threshold }}"
+          - "Compliance standards: {{ compliance_standards | join(', ') }}"
+          - "Scan frequency: {{ scan_frequency }}"
+          - "Security scripts: {{ security_scripts.stdout_lines | length }}"
+          - "Security scan: {{ 'PASSED' if security_scan.rc == 0 else 'FAILED' }}"
+          - "Compliance check: {{ 'PASSED' if compliance_check.rc == 0 else 'FAILED' }}"
+
+  handlers:
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+      when: ansible_os_family == "Debian"
+    
+    - name: restart auditd
+      systemd:
+        name: auditd
+        state: restarted
+      when: ansible_os_family == "Debian"
+    
+    - name: restart security service
+      systemd:
+        name: devops-security
+        state: restarted
+        daemon_reload: yes
+
+  post_tasks:
+    - name: Verify security tools installation
+      command: "{{ item }}"
+      register: tool_check
+      loop:
+        - "trivy --version"
+        - "falco --version"
+        - "opa version"
+        - "bandit --version"
+        - "safety --version"
+      ignore_errors: yes
+    
+    - name: Display security tools status
+      debug:
+        msg:
+          - "Security tools verification:"
+          - "Trivy: {{ 'INSTALLED' if tool_check.results[0].rc == 0 else 'NOT INSTALLED' }}"
+          - "Falco: {{ 'INSTALLED' if tool_check.results[1].rc == 0 else 'NOT INSTALLED' }}"
+          - "OPA: {{ 'INSTALLED' if tool_check.results[2].rc == 0 else 'NOT INSTALLED' }}"
+          - "Bandit: {{ 'INSTALLED' if tool_check.results[3].rc == 0 else 'NOT INSTALLED' }}"
+          - "Safety: {{ 'INSTALLED' if tool_check.results[4].rc == 0 else 'NOT INSTALLED' }}"
+          - "Security automation setup completed successfully!"
+
+  rescue:
+    - name: Display error information
+      debug:
+        msg: "DevOps security automation setup failed! Check the logs for more details."
+    
+    - name: Create security setup debug report
+      copy:
+        dest: "/tmp/security-debug-{{ ansible_date_time.iso8601 }}.txt"
+        content: |
+          DevOps Security Setup Debug Report
+          =================================
+          
+          Timestamp: {{ ansible_date_time.iso8601 }}
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Memory: {{ ansible_memtotal_mb }}MB
+          CPU: {{ ansible_processor_cores }} cores
+          
+          Variables:
+          - environment: {{ environment }}
+          - domain: {{ domain }}
+          - devops_user: {{ devops_user }}
+          - security_enabled: {{ security_enabled }}
+          - scanning_enabled: {{ scanning_enabled }}
+          - compliance_enabled: {{ compliance_enabled }}
+          
+          Last Task Status: {{ ansible_failed_task.name if ansible_failed_task is defined else 'Unknown' }}
+          Error Message: {{ ansible_failed_result.msg if ansible_failed_result is defined else 'Unknown' }}
+    
+    - name: Fail the playbook
+      fail:
+        msg: "DevOps security automation setup failed. Debug report saved to /tmp/security-debug-*.txt"

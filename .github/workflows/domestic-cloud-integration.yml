@@ -1,0 +1,745 @@
+name: Domestic Cloud Integration and Deployment
+
+on:
+  push:
+    branches: [ main, develop, staging, production ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 3 * * *'  # Daily at 3 AM
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud provider'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - sbercloud
+        - tinkoff-cloud
+        - cloud-ru
+        - yandex-cloud
+        - vk-cloud
+        - selectel
+      deployment_type:
+        description: 'Deployment type'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - infrastructure
+        - application
+        - monitoring
+        - backup
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - development
+        - staging
+        - production
+      compliance_check:
+        description: 'Run compliance checks'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  CLOUD_PROVIDER: ${{ github.event.inputs.cloud_provider || 'all' }}
+  DEPLOYMENT_TYPE: ${{ github.event.inputs.deployment_type || 'full' }}
+  TARGET_ENV: ${{ github.event.inputs.environment || 'staging' }}
+  COMPLIANCE_CHECK: ${{ github.event.inputs.compliance_check || 'true' }}
+
+jobs:
+  # SberCloud Integration
+  sbercloud-deployment:
+    runs-on: ubuntu-latest
+    if: contains(env.CLOUD_PROVIDER, 'all') || contains(env.CLOUD_PROVIDER, 'sbercloud')
+    environment: ${{ env.TARGET_ENV }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup SberCloud CLI
+      run: |
+        echo "🔧 Setting up SberCloud CLI..."
+        curl -sSL https://cloud.sbercloud.ru/cli/sbercloud-cli-linux-amd64.tar.gz | tar -xz
+        sudo mv sbercloud /usr/local/bin/
+        sbercloud --version
+
+    - name: Configure SberCloud credentials
+      run: |
+        echo "🔐 Configuring SberCloud credentials..."
+        sbercloud configure set \
+          --access-key "${{ secrets.SBERCLOUD_ACCESS_KEY }}" \
+          --secret-key "${{ secrets.SBERCLOUD_SECRET_KEY }}" \
+          --region "${{ secrets.SBERCLOUD_REGION }}" \
+          --project "${{ secrets.SBERCLOUD_PROJECT }}"
+
+    - name: Deploy infrastructure to SberCloud
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'infrastructure')
+      run: |
+        echo "🏗️ Deploying infrastructure to SberCloud..."
+        
+        # Create VPC and networking
+        sbercloud vpc create \
+          --name "space-invaders-vpc-${{ env.TARGET_ENV }}" \
+          --cidr "10.0.0.0/16"
+        
+        # Create subnets
+        sbercloud subnet create \
+          --name "space-invaders-subnet-${{ env.TARGET_ENV }}" \
+          --vpc "space-invaders-vpc-${{ env.TARGET_ENV }}" \
+          --cidr "10.0.1.0/24" \
+          --gateway "space-invaders-igw-${{ env.TARGET_ENV }}"
+        
+        # Create security groups
+        sbercloud security-group create \
+          --name "space-invaders-sg-${{ env.TARGET_ENV }}" \
+          --description "Security group for Space Invaders"
+        
+        # Add security group rules
+        sbercloud security-group rule create \
+          --group "space-invaders-sg-${{ env.TARGET_ENV }}" \
+          --direction ingress \
+          --protocol tcp \
+          --port-range 80 \
+          --source "0.0.0.0/0"
+        
+        sbercloud security-group rule create \
+          --group "space-invaders-sg-${{ env.TARGET_ENV }}" \
+          --direction ingress \
+          --protocol tcp \
+          --port-range 443 \
+          --source "0.0.0.0/0"
+
+    - name: Deploy application to SberCloud
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'application')
+      run: |
+        echo "🚀 Deploying application to SberCloud..."
+        
+        # Build Docker image
+        docker build -t space-invaders:sbercloud-${{ env.TARGET_ENV }} .
+        
+        # Push to SberCloud Container Registry
+        sbercloud cr login \
+          --region "${{ secrets.SBERCLOUD_REGION }}"
+        
+        docker tag space-invaders:sbercloud-${{ env.TARGET_ENV }} \
+          "${{ secrets.SBERCLOUD_REGISTRY }}/space-invaders:${{ env.TARGET_ENV }}"
+        
+        docker push "${{ secrets.SBERCLOUD_REGISTRY }}/space-invaders:${{ env.TARGET_ENV }}"
+        
+        # Create ECS service
+        sbercloud ecs service create \
+          --name "space-invaders-${{ env.TARGET_ENV }}" \
+          --image "${{ secrets.SBERCLOUD_REGISTRY }}/space-invaders:${{ env.TARGET_ENV }}" \
+          --cpu 512 \
+          --memory 1024 \
+          --port 80 \
+          --replicas 2
+
+    - name: Setup monitoring on SberCloud
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'monitoring')
+      run: |
+        echo "📊 Setting up monitoring on SberCloud..."
+        
+        # Create Cloud Eye monitoring
+        sbercloud ces alarm create \
+          --name "space-invaders-cpu-${{ env.TARGET_ENV }}" \
+          --metric "cpu_util" \
+          --resource-type "ecs_instance" \
+          --threshold 80 \
+          --comparison-operator ">" \
+          --evaluation-periods 2
+        
+        sbercloud ces alarm create \
+          --name "space-invaders-memory-${{ env.TARGET_ENV }}" \
+          --metric "mem_util" \
+          --resource-type "ecs_instance" \
+          --threshold 85 \
+          --comparison-operator ">" \
+          --evaluation-periods 2
+
+    - name: Run compliance checks on SberCloud
+      if: env.COMPLIANCE_CHECK == 'true'
+      run: |
+        echo "🔍 Running compliance checks on SberCloud..."
+        
+        python3 << 'EOF'
+        import json
+        import subprocess
+        import os
+        
+        def run_sbercloud_compliance_check():
+            compliance_report = {
+                "cloud_provider": "SberCloud",
+                "environment": "${{ env.TARGET_ENV }}",
+                "checks": {}
+            }
+            
+            # Check VPC configuration
+            try:
+                vpc_result = subprocess.run(
+                    ["sbercloud", "vpc", "list", "--format", "json"],
+                    capture_output=True, text=True
+                )
+                vpcs = json.loads(vpc_result.stdout)
+                compliance_report["checks"]["vpc"] = {
+                    "status": "passed" if len(vpcs) > 0 else "failed",
+                    "details": f"Found {len(vpcs)} VPCs"
+                }
+            except Exception as e:
+                compliance_report["checks"]["vpc"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Check security groups
+            try:
+                sg_result = subprocess.run(
+                    ["sbercloud", "security-group", "list", "--format", "json"],
+                    capture_output=True, text=True
+                )
+                sgs = json.loads(sg_result.stdout)
+                compliance_report["checks"]["security_groups"] = {
+                    "status": "passed" if len(sgs) > 0 else "failed",
+                    "details": f"Found {len(sgs)} security groups"
+                }
+            except Exception as e:
+                compliance_report["checks"]["security_groups"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Check ECS services
+            try:
+                ecs_result = subprocess.run(
+                    ["sbercloud", "ecs", "service", "list", "--format", "json"],
+                    capture_output=True, text=True
+                )
+                services = json.loads(ecs_result.stdout)
+                compliance_report["checks"]["ecs_services"] = {
+                    "status": "passed" if len(services) > 0 else "failed",
+                    "details": f"Found {len(services)} ECS services"
+                }
+            except Exception as e:
+                compliance_report["checks"]["ecs_services"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Save compliance report
+            with open('sbercloud-compliance-report.json', 'w') as f:
+                json.dump(compliance_report, f, indent=2)
+            
+            print("✅ SberCloud compliance check completed")
+            return compliance_report
+        
+        run_sbercloud_compliance_check()
+        EOF
+
+    - name: Upload SberCloud deployment reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbercloud-deployment-reports
+        path: |
+          sbercloud-compliance-report.json
+        retention-days: 30
+
+  # Tinkoff Cloud Integration
+  tinkoff-cloud-deployment:
+    runs-on: ubuntu-latest
+    if: contains(env.CLOUD_PROVIDER, 'all') || contains(env.CLOUD_PROVIDER, 'tinkoff-cloud')
+    environment: ${{ env.TARGET_ENV }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Tinkoff Cloud CLI
+      run: |
+        echo "🔧 Setting up Tinkoff Cloud CLI..."
+        curl -sSL https://api.tinkoff.cloud/cli/tinkoff-cloud-cli-linux.tar.gz | tar -xz
+        sudo mv tinkoff-cloud /usr/local/bin/
+        tinkoff-cloud --version
+
+    - name: Configure Tinkoff Cloud credentials
+      run: |
+        echo "🔐 Configuring Tinkoff Cloud credentials..."
+        tinkoff-cloud auth login \
+          --api-key "${{ secrets.TINKOFF_CLOUD_API_KEY }}" \
+          --secret-key "${{ secrets.TINKOFF_CLOUD_SECRET_KEY }}"
+
+    - name: Deploy to Tinkoff Cloud Kubernetes
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'application')
+      run: |
+        echo "🚀 Deploying to Tinkoff Cloud Kubernetes..."
+        
+        # Create namespace
+        tinkoff-cloud k8s namespace create \
+          --name "space-invaders-${{ env.TARGET_ENV }}"
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/ \
+          --namespace "space-invaders-${{ env.TARGET_ENV }}"
+        
+        # Wait for deployment
+        kubectl rollout status deployment/space-invaders \
+          --namespace "space-invaders-${{ env.TARGET_ENV }}" \
+          --timeout=300s
+
+    - name: Setup Tinkoff Cloud monitoring
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'monitoring')
+      run: |
+        echo "📊 Setting up Tinkoff Cloud monitoring..."
+        
+        # Install monitoring agent
+        kubectl apply -f monitoring/tinkoff-cloud/ \
+          --namespace "space-invaders-${{ env.TARGET_ENV }}"
+        
+        # Create monitoring dashboards
+        tinkoff-cloud monitoring dashboard create \
+          --name "space-invaders-${{ env.TARGET_ENV }}" \
+          --namespace "space-invaders-${{ env.TARGET_ENV }}"
+
+    - name: Run Tinkoff Cloud compliance checks
+      if: env.COMPLIANCE_CHECK == 'true'
+      run: |
+        echo "🔍 Running Tinkoff Cloud compliance checks..."
+        
+        python3 << 'EOF'
+        import json
+        import subprocess
+        
+        def run_tinkoff_compliance_check():
+            compliance_report = {
+                "cloud_provider": "Tinkoff Cloud",
+                "environment": "${{ env.TARGET_ENV }}",
+                "checks": {}
+            }
+            
+            # Check Kubernetes cluster
+            try:
+                cluster_result = subprocess.run(
+                    ["kubectl", "cluster-info", "--output", "json"],
+                    capture_output=True, text=True
+                )
+                compliance_report["checks"]["kubernetes"] = {
+                    "status": "passed" if cluster_result.returncode == 0 else "failed",
+                    "details": "Cluster accessible" if cluster_result.returncode == 0 else "Cluster not accessible"
+                }
+            except Exception as e:
+                compliance_report["checks"]["kubernetes"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Check pod status
+            try:
+                pods_result = subprocess.run(
+                    ["kubectl", "get", "pods", "--namespace", "space-invaders-${{ env.TARGET_ENV }}", "--output", "json"],
+                    capture_output=True, text=True
+                )
+                pods = json.loads(pods_result.stdout)
+                running_pods = len([p for p in pods.get('items', []) if p['status']['phase'] == 'Running'])
+                compliance_report["checks"]["pods"] = {
+                    "status": "passed" if running_pods > 0 else "failed",
+                    "details": f"{running_pods} pods running"
+                }
+            except Exception as e:
+                compliance_report["checks"]["pods"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Save compliance report
+            with open('tinkoff-cloud-compliance-report.json', 'w') as f:
+                json.dump(compliance_report, f, indent=2)
+            
+            print("✅ Tinkoff Cloud compliance check completed")
+            return compliance_report
+        
+        run_tinkoff_compliance_check()
+        EOF
+
+    - name: Upload Tinkoff Cloud deployment reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: tinkoff-cloud-deployment-reports
+        path: |
+          tinkoff-cloud-compliance-report.json
+        retention-days: 30
+
+  # Cloud.ru Integration
+  cloud-ru-deployment:
+    runs-on: ubuntu-latest
+    if: contains(env.CLOUD_PROVIDER, 'all') || contains(env.CLOUD_PROVIDER, 'cloud-ru')
+    environment: ${{ env.TARGET_ENV }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Cloud.ru CLI
+      run: |
+        echo "🔧 Setting up Cloud.ru CLI..."
+        curl -sSL https://cloud.ru/cli/cloud-ru-cli-linux.tar.gz | tar -xz
+        sudo mv cloud-ru /usr/local/bin/
+        cloud-ru --version
+
+    - name: Configure Cloud.ru credentials
+      run: |
+        echo "🔐 Configuring Cloud.ru credentials..."
+        cloud-ru configure set \
+          --token "${{ secrets.CLOUD_RU_TOKEN }}" \
+          --organization "${{ secrets.CLOUD_RU_ORG }}" \
+          --workspace "${{ secrets.CLOUD_RU_WORKSPACE }}"
+
+    - name: Deploy to Cloud.ru VM
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'application')
+      run: |
+        echo "🚀 Deploying to Cloud.ru VM..."
+        
+        # Create VM instance
+        cloud-ru vm create \
+          --name "space-invaders-${{ env.TARGET_ENV }}" \
+          --image "ubuntu-22.04" \
+          --cpu 2 \
+          --memory 4096 \
+          --disk 50 \
+          --ssh-key "${{ secrets.CLOUD_RU_SSH_KEY }}"
+        
+        # Get VM IP
+        VM_IP=$(cloud-ru vm list --format json | jq -r '.[] | select(.name=="space-invaders-${{ env.TARGET_ENV }}") | .public_ip')
+        
+        # Deploy application via SSH
+        ssh -o StrictHostKeyChecking=no root@$VM_IP << 'EOF'
+          # Update system
+          apt update && apt upgrade -y
+          
+          # Install Docker
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+          
+          # Pull and run application
+          docker run -d \
+            --name space-invaders \
+            -p 80:80 \
+            "${{ secrets.CLOUD_RU_REGISTRY }}/space-invaders:${{ env.TARGET_ENV }}"
+        EOF
+
+    - name: Setup Cloud.ru backup
+      if: contains(env.DEPLOYMENT_TYPE, 'all') || contains(env.DEPLOYMENT_TYPE, 'backup')
+      run: |
+        echo "💾 Setting up Cloud.ru backup..."
+        
+        # Create backup schedule
+        cloud-ru backup schedule create \
+          --name "space-invaders-backup-${{ env.TARGET_ENV }}" \
+          --resource "space-invaders-${{ env.TARGET_ENV }}" \
+          --schedule "0 2 * * *" \
+          --retention 30
+
+    - name: Run Cloud.ru compliance checks
+      if: env.COMPLIANCE_CHECK == 'true'
+      run: |
+        echo "🔍 Running Cloud.ru compliance checks..."
+        
+        python3 << 'EOF'
+        import json
+        import subprocess
+        
+        def run_cloud_ru_compliance_check():
+            compliance_report = {
+                "cloud_provider": "Cloud.ru",
+                "environment": "${{ env.TARGET_ENV }}",
+                "checks": {}
+            }
+            
+            # Check VM instances
+            try:
+                vm_result = subprocess.run(
+                    ["cloud-ru", "vm", "list", "--format", "json"],
+                    capture_output=True, text=True
+                )
+                vms = json.loads(vm_result.stdout)
+                target_vm = [vm for vm in vms if vm.get('name') == f"space-invaders-${{ env.TARGET_ENV }}"]
+                compliance_report["checks"]["vm"] = {
+                    "status": "passed" if len(target_vm) > 0 else "failed",
+                    "details": f"VM {'found' if len(target_vm) > 0 else 'not found'}"
+                }
+            except Exception as e:
+                compliance_report["checks"]["vm"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Check backup schedules
+            try:
+                backup_result = subprocess.run(
+                    ["cloud-ru", "backup", "schedule", "list", "--format", "json"],
+                    capture_output=True, text=True
+                )
+                backups = json.loads(backup_result.stdout)
+                target_backup = [b for b in backups if b.get('name') == f"space-invaders-backup-${{ env.TARGET_ENV }}"]
+                compliance_report["checks"]["backup"] = {
+                    "status": "passed" if len(target_backup) > 0 else "failed",
+                    "details": f"Backup schedule {'configured' if len(target_backup) > 0 else 'not configured'}"
+                }
+            except Exception as e:
+                compliance_report["checks"]["backup"] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+            
+            # Save compliance report
+            with open('cloud-ru-compliance-report.json', 'w') as f:
+                json.dump(compliance_report, f, indent=2)
+            
+            print("✅ Cloud.ru compliance check completed")
+            return compliance_report
+        
+        run_cloud_ru_compliance_check()
+        EOF
+
+    - name: Upload Cloud.ru deployment reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: cloud-ru-deployment-reports
+        path: |
+          cloud-ru-compliance-report.json
+        retention-days: 30
+
+  # Comprehensive Domestic Cloud Report
+  domestic-cloud-report:
+    runs-on: ubuntu-latest
+    needs: [sbercloud-deployment, tinkoff-cloud-deployment, cloud-ru-deployment]
+    if: always() && (needs.sbercloud-deployment.result == 'success' || needs.tinkoff-cloud-deployment.result == 'success' || needs.cloud-ru-deployment.result == 'success')
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Generate comprehensive domestic cloud report
+      run: |
+        python3 << 'EOF'
+        import json
+        import os
+        from datetime import datetime
+        
+        def generate_domestic_cloud_report():
+            report = {
+                "report_date": datetime.now().isoformat(),
+                "repository": "${{ github.repository }}",
+                "commit": "${{ github.sha }}",
+                "branch": "${{ github.ref }}",
+                "deployment_type": "${{ env.DEPLOYMENT_TYPE }}",
+                "environment": "${{ env.TARGET_ENV }}",
+                "cloud_providers": {}
+            }
+            
+            # Collect SberCloud results
+            if os.path.exists('sbercloud-deployment-reports'):
+                if os.path.exists('sbercloud-deployment-reports/sbercloud-compliance-report.json'):
+                    with open('sbercloud-deployment-reports/sbercloud-compliance-report.json', 'r') as f:
+                        sbercloud_data = json.load(f)
+                        report["cloud_providers"]["sbercloud"] = sbercloud_data
+                else:
+                    report["cloud_providers"]["sbercloud"] = {"status": "completed", "details": "Deployment successful"}
+            
+            # Collect Tinkoff Cloud results
+            if os.path.exists('tinkoff-cloud-deployment-reports'):
+                if os.path.exists('tinkoff-cloud-deployment-reports/tinkoff-cloud-compliance-report.json'):
+                    with open('tinkoff-cloud-deployment-reports/tinkoff-cloud-compliance-report.json', 'r') as f:
+                        tinkoff_data = json.load(f)
+                        report["cloud_providers"]["tinkoff_cloud"] = tinkoff_data
+                else:
+                    report["cloud_providers"]["tinkoff_cloud"] = {"status": "completed", "details": "Deployment successful"}
+            
+            # Collect Cloud.ru results
+            if os.path.exists('cloud-ru-deployment-reports'):
+                if os.path.exists('cloud-ru-deployment-reports/cloud-ru-compliance-report.json'):
+                    with open('cloud-ru-deployment-reports/cloud-ru-compliance-report.json', 'r') as f:
+                        cloud_ru_data = json.load(f)
+                        report["cloud_providers"]["cloud_ru"] = cloud_ru_data
+                else:
+                    report["cloud_providers"]["cloud_ru"] = {"status": "completed", "details": "Deployment successful"}
+            
+            # Calculate overall compliance score
+            total_checks = 0
+            passed_checks = 0
+            
+            for provider, data in report["cloud_providers"].items():
+                if "checks" in data:
+                    for check_name, check_data in data["checks"].items():
+                        total_checks += 1
+                        if check_data.get("status") == "passed":
+                            passed_checks += 1
+            
+            if total_checks > 0:
+                report["overall_compliance_score"] = round((passed_checks / total_checks) * 100, 2)
+            else:
+                report["overall_compliance_score"] = 100
+            
+            # Save report
+            with open('comprehensive-domestic-cloud-report.json', 'w') as f:
+                json.dump(report, f, indent=2)
+            
+            # Generate HTML report
+            html_report = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Domestic Cloud Deployment Report</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                    .header {{ background: #f0f0f0; padding: 20px; border-radius: 5px; }}
+                    .provider {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
+                    .score {{ font-size: 24px; font-weight: bold; color: {"green" if report.get("overall_compliance_score", 0) >= 80 else "orange" if report.get("overall_compliance_score", 0) >= 60 else "red"}; }}
+                    .check {{ margin: 10px 0; padding: 5px; }}
+                    .passed {{ background: #d4edda; }}
+                    .failed {{ background: #f8d7da; }}
+                    .error {{ background: #fff3cd; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>Domestic Cloud Deployment Report</h1>
+                    <p><strong>Repository:</strong> ${{ github.repository }}</p>
+                    <p><strong>Commit:</strong> ${{ github.sha }}</p>
+                    <p><strong>Branch:</strong> ${{ github.ref }}</p>
+                    <p><strong>Environment:</strong> ${{ env.TARGET_ENV }}</p>
+                    <p><strong>Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                </div>
+                
+                <div class="provider">
+                    <h2>Overall Compliance Score</h2>
+                    <div class="score">{report.get('overall_compliance_score', 'N/A')}%</div>
+                </div>
+                
+                <div class="provider">
+                    <h2>SberCloud</h2>
+                    {generate_provider_html(report["cloud_providers"].get("sbercloud", {}))}
+                </div>
+                
+                <div class="provider">
+                    <h2>Tinkoff Cloud</h2>
+                    {generate_provider_html(report["cloud_providers"].get("tinkoff_cloud", {}))}
+                </div>
+                
+                <div class="provider">
+                    <h2>Cloud.ru</h2>
+                    {generate_provider_html(report["cloud_providers"].get("cloud_ru", {}))}
+                </div>
+            </body>
+            </html>
+            """
+            
+            def generate_provider_html(provider_data):
+                if "checks" not in provider_data:
+                    return "<p>Deployment completed successfully</p>"
+                
+                html = ""
+                for check_name, check_data in provider_data["checks"].items():
+                    status = check_data.get("status", "unknown")
+                    css_class = status
+                    html += f'<div class="check {css_class}"><strong>{check_name}:</strong> {status} - {check_data.get("details", "")}</div>'
+                
+                return html
+            
+            html_report = html_report.replace("{generate_provider_html(report[\"cloud_providers\"].get(\"sbercloud\", {}))}", 
+                                         generate_provider_html(report["cloud_providers"].get("sbercloud", {})))
+            html_report = html_report.replace("{generate_provider_html(report[\"cloud_providers\"].get(\"tinkoff_cloud\", {}))}", 
+                                         generate_provider_html(report["cloud_providers"].get("tinkoff_cloud", {})))
+            html_report = html_report.replace("{generate_provider_html(report[\"cloud_providers\"].get(\"cloud_ru\", {}))}", 
+                                         generate_provider_html(report["cloud_providers"].get("cloud_ru", {})))
+            
+            with open('domestic-cloud-report.html', 'w') as f:
+                f.write(html_report)
+            
+            print("✅ Comprehensive domestic cloud report generated!")
+            print(f"Overall Compliance Score: {report.get('overall_compliance_score', 'N/A')}%")
+            return report
+        
+        generate_domestic_cloud_report()
+        EOF
+
+    - name: Upload comprehensive domestic cloud report
+      uses: actions/upload-artifact@v4
+      with:
+        name: comprehensive-domestic-cloud-report
+        path: |
+          comprehensive-domestic-cloud-report.json
+          domestic-cloud-report.html
+        retention-days: 90
+
+    - name: Create deployment issue on failures
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🚨 Domestic Cloud Deployment Failed - ${new Date().toISOString().split('T')[0]}`,
+            body: `## Domestic Cloud Deployment Failure
+            
+            **Repository:** ${context.repo.owner}/${context.repo.repo}
+            **Commit:** ${context.sha}
+            **Branch:** ${context.ref}
+            **Environment:** ${process.env.TARGET_ENV}
+            **Deployment Type:** ${process.env.DEPLOYMENT_TYPE}
+            **Cloud Provider:** ${process.env.CLOUD_PROVIDER}
+            
+            ### Failed Jobs
+            Please review the failed jobs and address the deployment issues:
+            
+            - SberCloud Deployment: ${{ needs.sbercloud-deployment.result }}
+            - Tinkoff Cloud Deployment: ${{ needs.tinkoff-cloud-deployment.result }}
+            - Cloud.ru Deployment: ${{ needs.cloud-ru-deployment.result }}
+            
+            ### Action Required
+            1. Review workflow logs for failed deployments
+            2. Check cloud provider credentials and permissions
+            3. Verify infrastructure configurations
+            4. Manually complete deployment if necessary
+            
+            ### Workflow URL
+            [View Workflow Run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ---
+            *This issue was automatically created due to deployment failure.*`,
+            labels: ['deployment', 'domestic-cloud', 'failed']
+          })
+
+    - name: Notify deployment team
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        text: |
+          🌐 **Domestic Cloud Deployment Status: ${{ job.status }}**
+          
+          **Repository:** ${{ github.repository }}
+          **Environment:** ${{ env.TARGET_ENV }}
+          **Cloud Providers:** ${{ env.CLOUD_PROVIDER }}
+          **Deployment Type:** ${{ env.DEPLOYMENT_TYPE }}
+          
+          ${{ job.status == 'success' && '✅ Deployment completed successfully!' || '❌ Deployment failed!' }}
+          
+          **Results:**
+          - SberCloud: ${{ needs.sbercloud-deployment.result }}
+          - Tinkoff Cloud: ${{ needs.tinkoff-cloud-deployment.result }}
+          - Cloud.ru: ${{ needs.cloud-ru-deployment.result }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

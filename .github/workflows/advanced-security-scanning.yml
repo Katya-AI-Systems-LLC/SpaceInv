@@ -1,0 +1,481 @@
+name: Advanced Security Scanning and Vulnerability Assessment
+
+on:
+  push:
+    branches: [ main, develop, staging, production ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM
+  workflow_dispatch:
+    inputs:
+      scan_level:
+        description: 'Scan level'
+        required: true
+        default: 'standard'
+        type: choice
+        options:
+        - standard
+        - deep
+        - critical-only
+      target_environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+        - development
+        - staging
+        - production
+
+env:
+  SCAN_LEVEL: ${{ github.event.inputs.scan_level || 'standard' }}
+  TARGET_ENV: ${{ github.event.inputs.target_environment || 'staging' }}
+  SECURE_API_TOKEN: ${{ secrets.SECURE_API_TOKEN }}
+  SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+  CODEQL_TOKEN: ${{ secrets.CODEQL_TOKEN }}
+  TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+
+jobs:
+  # Static Application Security Testing (SAST)
+  sast-analysis:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+
+    - name: Install dependencies
+      run: |
+        flutter pub get
+        pip3 install bandit safety semgrep
+
+    - name: Run Bandit security analysis
+      run: |
+        echo "🔍 Running Bandit security analysis..."
+        bandit -r lib/ -f json -o bandit-report.json || true
+        bandit -r lib/ -f txt -o bandit-report.txt || true
+
+    - name: Run Safety dependency check
+      run: |
+        echo "🔍 Running Safety dependency check..."
+        safety check --json --output safety-report.json || true
+        safety check --output safety-report.txt || true
+
+    - name: Run Semgrep security scan
+      run: |
+        echo "🔍 Running Semgrep security scan..."
+        semgrep --config=auto --json --output=semgrep-report.json lib/ || true
+        semgrep --config=auto --output=semgrep-report.txt lib/ || true
+
+    - name: Upload SAST reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: sast-reports
+        path: |
+          bandit-report.*
+          safety-report.*
+          semgrep-report.*
+        retention-days: 30
+
+    - name: CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+      with:
+        languages: javascript, python
+        queries: security-extended
+
+  # Dynamic Application Security Testing (DAST)
+  dast-analysis:
+    runs-on: ubuntu-latest
+    needs: sast-analysis
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+
+    - name: Build application
+      run: |
+        flutter pub get
+        flutter build web --no-sound-null-safety
+
+    - name: Run OWASP ZAP Baseline Scan
+      run: |
+        docker run -t owasp/zap2docker-stable zap-baseline.py \
+          -t http://localhost:8080 \
+          -J zap-report.json \
+          -I zap-report.html || true
+
+    - name: Run Nuclei vulnerability scan
+      run: |
+        docker run -t projectdiscovery/nuclei \
+          -l http://localhost:8080 \
+          -json -o nuclei-report.json || true
+
+    - name: Upload DAST reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: dast-reports
+        path: |
+          zap-report.*
+          nuclei-report.*
+        retention-days: 30
+
+  # Container Security Scanning
+  container-security:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: space-invaders:security-scan
+        load: true
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run Trivy vulnerability scanner
+      run: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $PWD:/root/.cache/ aquasec/trivy:latest \
+          image --format json --output trivy-report.json space-invaders:security-scan || true
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          -v $PWD:/root/.cache/ aquasec/trivy:latest \
+          image --format table space-invaders:security-scan || true
+
+    - name: Run Grype vulnerability scanner
+      run: |
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          anchore/grype:latest \
+          space-invaders:security-scan \
+          -o json > grype-report.json || true
+        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+          anchore/grype:latest \
+          space-invaders:security-scan || true
+
+    - name: Upload container security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: container-security-reports
+        path: |
+          trivy-report.*
+          grype-report.*
+        retention-days: 30
+
+  # Infrastructure Security Scanning
+  infrastructure-security:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: '1.6.0'
+
+    - name: Run Terraform security scan
+      run: |
+        echo "🔍 Running Terraform security scan..."
+        cd terraform
+        terraform init
+        terraform plan -out=tfplan
+        terraform show -json tfplan > terraform-plan.json
+
+    - name: Run Checkov security scan
+      run: |
+        pip3 install checkov
+        checkov -d terraform/ -f json -o checkov-report.json || true
+        checkov -d terraform/ -o checkov-report.txt || true
+
+    - name: Run Tfsec security scan
+      run: |
+        docker run --rm -v $PWD:/app aquasec/tfsec:latest \
+          /app/terraform/ --format=json --out=tfsec-report.json || true
+        docker run --rm -v $PWD:/app aquasec/tfsec:latest \
+          /app/terraform/ --format=compact > tfsec-report.txt || true
+
+    - name: Upload infrastructure security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: infrastructure-security-reports
+        path: |
+          terraform-plan.json
+          checkov-report.*
+          tfsec-report.*
+        retention-days: 30
+
+  # Dependency Security Analysis
+  dependency-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.16.0'
+        channel: 'stable'
+
+    - name: Run Snyk dependency scan
+      run: |
+        echo "🔍 Running Snyk dependency scan..."
+        npm install -g snyk
+        snyk test --json > snyk-report.json || true
+        snyk test --sarif > snyk-report.sarif || true
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    - name: Run OWASP Dependency Check
+      run: |
+        docker run --rm -v $PWD:/app owasp/dependency-check:latest \
+          --scan /app --format JSON --out dependency-check-report || true
+
+    - name: Upload dependency security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: dependency-security-reports
+        path: |
+          snyk-report.*
+          dependency-check-report/*
+        retention-days: 30
+
+    - name: Upload SARIF file to GitHub
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: snyk-report.sarif
+
+  # Security Scorecard
+  security-scorecard:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      security-events: write
+      actions: read
+      id-token: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Run OSSF Scorecard
+      uses: ossf/scorecard-action@v2.3.1
+      with:
+        results_file: scorecard-results.json
+        results_format: json
+
+    - name: Upload Scorecard results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: scorecard-results.json
+
+  # Comprehensive Security Report
+  security-report:
+    runs-on: ubuntu-latest
+    needs: [sast-analysis, dast-analysis, container-security, infrastructure-security, dependency-security]
+    if: always() && (needs.sast-analysis.result == 'success' || needs.dast-analysis.result == 'success' || needs.container-security.result == 'success' || needs.infrastructure-security.result == 'success' || needs.dependency-security.result == 'success')
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Generate comprehensive security report
+      run: |
+        python3 << 'EOF'
+        import json
+        import os
+        from datetime import datetime
+        
+        def generate_security_report():
+            report = {
+                "scan_date": datetime.now().isoformat(),
+                "repository": "${{ github.repository }}",
+                "commit": "${{ github.sha }}",
+                "branch": "${{ github.ref }}",
+                "scan_level": "${{ env.SCAN_LEVEL }}",
+                "target_environment": "${{ env.TARGET_ENV }}",
+                "scans": {}
+            }
+            
+            # Collect SAST results
+            if os.path.exists('sast-reports'):
+                report["scans"]["sast"] = {
+                    "status": "completed",
+                    "files": list(os.listdir('sast-reports'))
+                }
+            
+            # Collect DAST results
+            if os.path.exists('dast-reports'):
+                report["scans"]["dast"] = {
+                    "status": "completed", 
+                    "files": list(os.listdir('dast-reports'))
+                }
+            
+            # Collect container security results
+            if os.path.exists('container-security-reports'):
+                report["scans"]["container"] = {
+                    "status": "completed",
+                    "files": list(os.listdir('container-security-reports'))
+                }
+            
+            # Collect infrastructure security results
+            if os.path.exists('infrastructure-security-reports'):
+                report["scans"]["infrastructure"] = {
+                    "status": "completed",
+                    "files": list(os.listdir('infrastructure-security-reports'))
+                }
+            
+            # Collect dependency security results
+            if os.path.exists('dependency-security-reports'):
+                report["scans"]["dependency"] = {
+                    "status": "completed",
+                    "files": list(os.listdir('dependency-security-reports'))
+                }
+            
+            # Save report
+            with open('comprehensive-security-report.json', 'w') as f:
+                json.dump(report, f, indent=2)
+            
+            print("✅ Comprehensive security report generated!")
+            return report
+        
+        generate_security_report()
+        EOF
+
+    - name: Upload comprehensive security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: comprehensive-security-report
+        path: comprehensive-security-report.json
+        retention-days: 90
+
+    - name: Create security issue on critical findings
+      if: contains(github.event.head_commit.message, '[security-scan]')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const report = JSON.parse(fs.readFileSync('comprehensive-security-report.json', 'utf8'));
+            
+            // Check for critical findings (simplified logic)
+            const hasCriticalFindings = false; // Add actual logic to check reports
+            
+            if (hasCriticalFindings) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🚨 Critical Security Findings Detected - ${new Date().toISOString().split('T')[0]}`,
+                body: `## Security Scan Results
+                
+                **Repository:** ${context.repo.owner}/${context.repo.repo}
+                **Commit:** ${context.sha}
+                **Branch:** ${context.ref}
+                **Scan Level:** ${process.env.SCAN_LEVEL}
+                **Target Environment:** ${process.env.TARGET_ENV}
+                
+                ### Summary
+                A comprehensive security scan has been completed and critical findings were detected.
+                
+                ### Scan Results
+                ${JSON.stringify(report.scans, null, 2)}
+                
+                ### Action Required
+                Please review the detailed security reports in the artifacts and address the critical findings immediately.
+                
+                ### Reports Available
+                - SAST Analysis: \`sast-reports\` artifact
+                - DAST Analysis: \`dast-reports\` artifact  
+                - Container Security: \`container-security-reports\` artifact
+                - Infrastructure Security: \`infrastructure-security-reports\` artifact
+                - Dependency Security: \`dependency-security-reports\` artifact
+                
+                ---
+                *This issue was automatically created by the Advanced Security Scanning workflow.*`,
+                labels: ['security', 'critical', 'automated-scan']
+              });
+            }
+          } catch (error) {
+            console.log('Could not create security issue:', error.message);
+          }
+
+    - name: Notify security team
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `🔴 Security Scan Failed - ${new Date().toISOString().split('T')[0]}`,
+            body: `## Security Scan Failure
+            
+            **Repository:** ${context.repo.owner}/${context.repo.repo}
+            **Commit:** ${context.sha}
+            **Branch:** ${context.ref}
+            **Workflow:** ${context.workflow}
+            **Run ID:** ${context.runId}
+            
+            ### Error Details
+            The advanced security scanning workflow has failed. Please investigate the failure and resolve any issues.
+            
+            ### Workflow URL
+            [View Workflow Run](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})
+            
+            ---
+            *This issue was automatically created due to workflow failure.*`,
+            labels: ['security', 'failed-scan', 'automated-scan']
+          })

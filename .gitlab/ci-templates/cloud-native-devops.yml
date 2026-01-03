@@ -1,0 +1,564 @@
+# Cloud Native DevOps CI/CD Template
+# Advanced template for cloud-native applications with Kubernetes, Helm, and monitoring
+
+stages:
+  - validate
+  - build
+  - security
+  - deploy
+  - test
+  - monitor
+  - cleanup
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_HOST: tcp://docker:2376
+  KUBECTL_VERSION: "1.28.4"
+  HELM_VERSION: "3.13.3"
+  KUSTOMIZE_VERSION: "5.0.3"
+  CLUSTER_NAME: "gitlab-cluster"
+  NAMESPACE: "cloud-native"
+  DOCKER_REGISTRY: "$CI_REGISTRY"
+  DOCKER_IMAGE: "$CI_REGISTRY_IMAGE/cloud-native-app"
+
+# Cache configuration
+.cache_template: &cache_configuration
+  cache:
+    key: "$CI_COMMIT_REF_SLUG"
+    paths:
+      - .docker/
+      - vendor/
+      - node_modules/
+      - .cache/
+
+# Docker in Docker template
+.dind_template: &dind_configuration
+  image: docker:24.0.6
+  services:
+    - docker:24.0.6-dind
+  variables:
+    <<: *cache_configuration
+
+# Kubernetes template
+.k8s_template: &k8s_configuration
+  image: bitnami/kubectl:$KUBECTL_VERSION
+  before_script:
+    - mkdir -p $HOME/.kube
+    - echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+    - kubectl cluster-info
+
+# Helm template
+.helm_template: &helm_configuration
+  image: alpine/helm:$HELM_VERSION
+  before_script:
+    - mkdir -p $HOME/.kube
+    - echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+    - helm repo add bitnami https://charts.bitnami.com/bitnami
+    - helm repo add jetstack https://charts.jetstack.io
+    - helm repo update
+
+# Validate manifests and configurations
+validate-manifests:
+  stage: validate
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache curl jq yamllint
+    - curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+    - mv kustomize /usr/local/bin/
+  script:
+    - echo "🔍 Validating Kubernetes manifests..."
+    - find . -name "*.yaml" -o -name "*.yml" | xargs yamllint
+    - echo "✅ YAML validation passed"
+    - |
+      if [ -d "kubernetes" ]; then
+        echo "🔍 Validating Kubernetes resources..."
+        for manifest in kubernetes/**/*.yaml; do
+          if [ -f "$manifest" ]; then
+            kubectl --dry-run=client apply -f "$manifest"
+          fi
+        done
+        echo "✅ Kubernetes manifests validated"
+      fi
+    - |
+      if [ -d "kustomize" ]; then
+        echo "🔍 Validating Kustomize overlays..."
+        for overlay in kustomize/overlays/*; do
+          if [ -d "$overlay" ]; then
+            kustomize build "$overlay" | kubectl --dry-run=client apply -f -
+          fi
+        done
+        echo "✅ Kustomize overlays validated"
+      fi
+    - |
+      if [ -d "helm" ]; then
+        echo "🔍 Validating Helm charts..."
+        for chart in helm/*/; do
+          if [ -d "$chart" ]; then
+            helm lint "$chart"
+          fi
+        done
+        echo "✅ Helm charts validated"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - kubernetes/**/*
+        - kustomize/**/*
+        - helm/**/*
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - kubernetes/**/*
+        - kustomize/**/*
+        - helm/**/*
+
+# Build Docker image
+build-image:
+  stage: build
+  <<: *dind_configuration
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+  script:
+    - echo "🏗️ Building Docker image..."
+    - |
+      if [ -f "cloud-native/Dockerfile" ]; then
+        DOCKER_CONTEXT="cloud-native"
+      elif [ -f "Dockerfile" ]; then
+        DOCKER_CONTEXT="."
+      else
+        echo "❌ No Dockerfile found"
+        exit 1
+      fi
+    - |
+      # Build metadata
+      IMAGE_TAG="$CI_COMMIT_SHORT_SHA"
+      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        IMAGE_TAG="latest"
+      elif [ "$CI_COMMIT_REF_NAME" = "develop" ]; then
+        IMAGE_TAG="develop"
+      fi
+      echo "IMAGE_TAG=$IMAGE_TAG" >> build.env
+    - |
+      # Build and push image
+      docker buildx create --use
+      docker buildx build \
+        --platform linux/amd64,linux/arm64 \
+        --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+        --build-arg VCS_REF="$CI_COMMIT_SHA" \
+        --build-arg VERSION="$IMAGE_TAG" \
+        --tag "$DOCKER_IMAGE:$IMAGE_TAG" \
+        --tag "$DOCKER_IMAGE:$CI_COMMIT_SHA" \
+        --push \
+        "$DOCKER_CONTEXT"
+    - echo "✅ Docker image built and pushed"
+    - echo "📋 Image: $DOCKER_IMAGE:$IMAGE_TAG"
+  artifacts:
+    reports:
+      dotenv: build.env
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - cloud-native/**/*
+        - Dockerfile
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+
+# Security scanning
+security-scan:
+  stage: security
+  <<: *dind_configuration
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - apk add --no-cache curl jq
+  script:
+    - echo "🔒 Running security scans..."
+    - |
+      # Pull the built image
+      docker pull "$DOCKER_IMAGE:$IMAGE_TAG"
+    - |
+      # Run Trivy vulnerability scanner
+      docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$PWD":/tmp/.cache/ \
+        aquasec/trivy:latest image \
+        --format json \
+        --output /tmp/.cache/trivy-results.json \
+        --exit-code 1 \
+        --severity HIGH,CRITICAL \
+        "$DOCKER_IMAGE:$IMAGE_TAG" || true
+    - |
+      # Generate security report
+      cat > security-report.md << EOF
+      # Cloud Native Security Report
+      
+      ## Image Information
+      - **Image**: $DOCKER_IMAGE:$IMAGE_TAG
+      - **Digest**: $(docker inspect --format='{{index .RepoDigests 0}}' "$DOCKER_IMAGE:$IMAGE_TAG")
+      
+      ## Vulnerability Scan Results
+      \`\`\`json
+      $(cat /tmp/.cache/trivy-results.json | jq '.Results[] | select(.Vulnerabilities != null) | {Target: .Target, Vulnerabilities: .Vulnerabilities | length}')
+      \`\`\`
+      
+      ## Critical Findings
+      \`\`\`json
+      $(cat /tmp/.cache/trivy-results.json | jq '.Results[] | select(.Vulnerabilities != null) | .Vulnerabilities[] | select(.Severity == "CRITICAL") | {VulnerabilityID, Severity, Title}')
+      \`\`\`
+      
+      Generated on: $(date)
+      EOF
+    - echo "✅ Security scan completed"
+  artifacts:
+    reports:
+      junit: security-report.xml
+    paths:
+      - trivy-results.json
+      - security-report.md
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - cloud-native/**/*
+        - Dockerfile
+    - when: manual
+  allow_failure: true
+
+# Deploy with Helm
+deploy-helm:
+  stage: deploy
+  <<: *helm_configuration
+  environment:
+    name: $CI_COMMIT_REF_NAME
+    url: https://$CI_COMMIT_REF_NAME.space-invaders.local
+  script:
+    - echo "🚀 Deploying with Helm..."
+    - |
+      # Create environment-specific values
+      cat > values-$CI_COMMIT_REF_NAME.yaml << EOF
+      image:
+        repository: $DOCKER_IMAGE
+        tag: $IMAGE_TAG
+        pullPolicy: Always
+      
+      replicaCount: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "3" || echo "1")
+      
+      resources:
+        limits:
+          cpu: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "1000m" || echo "500m")
+          memory: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "1Gi" || echo "512Mi")
+        requests:
+          cpu: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "500m" || echo "250m")
+          memory: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "512Mi" || echo "256Mi")
+      
+      autoscaling:
+        enabled: $([ "$CI_COMMIT_REF_NAME" = "main" ] && echo "true" || echo "false")
+        minReplicas: 2
+        maxReplicas: 10
+        targetCPUUtilizationPercentage: 70
+      
+      monitoring:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+      
+      ingress:
+        enabled: true
+        className: nginx
+        annotations:
+          cert-manager.io/cluster-issuer: letsencrypt-prod
+          nginx.ingress.kubernetes.io/rate-limit: "100"
+        hosts:
+          - host: $CI_COMMIT_REF_NAME.space-invaders.local
+            paths:
+              - path: /
+                pathType: Prefix
+        tls:
+          - secretName: $CI_COMMIT_REF_NAME-tls
+            hosts:
+              - $CI_COMMIT_REF_NAME.space-invaders.local
+      EOF
+    - |
+      # Deploy each component
+      for component in frontend backend database monitoring; do
+        if [ -d "helm/$component" ]; then
+          echo "📦 Deploying $component..."
+          helm upgrade --install $component helm/$component \
+            --namespace $NAMESPACE \
+            --create-namespace \
+            --values values-$CI_COMMIT_REF_NAME.yaml \
+            --wait \
+            --timeout 10m \
+            --atomic
+        fi
+      done
+    - echo "✅ Helm deployment completed"
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"
+    - if: $CI_COMMIT_REF_NAME == "develop"
+    - when: manual
+
+# Deploy with Kustomize
+deploy-kustomize:
+  stage: deploy
+  <<: *k8s_configuration
+  environment:
+    name: $CI_COMMIT_REF_NAME
+    url: https://$CI_COMMIT_REF_NAME.space-invaders.local
+  script:
+    - echo "🚀 Deploying with Kustomize..."
+    - |
+      # Install kustomize
+      curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+      mv kustomize /usr/local/bin/
+    - |
+      # Deploy with kustomize
+      if [ -d "kustomize/overlays/$CI_COMMIT_REF_NAME" ]; then
+        OVERLAY="kustomize/overlays/$CI_COMMIT_REF_NAME"
+      elif [ -d "kustomize/overlays/staging" ]; then
+        OVERLAY="kustomize/overlays/staging"
+      else
+        echo "❌ No suitable kustomize overlay found"
+        exit 1
+      fi
+      
+      echo "📦 Using overlay: $OVERLAY"
+      
+      # Build and apply
+      kustomize build "$OVERLAY" | kubectl apply -f - --namespace $NAMESPACE
+      
+      # Wait for rollout
+      kubectl rollout status deployment/cloud-native-app \
+        --namespace $NAMESPACE \
+        --timeout=300s
+    - echo "✅ Kustomize deployment completed"
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"
+    - if: $CI_COMMIT_REF_NAME == "develop"
+    - when: manual
+
+# Integration testing
+integration-test:
+  stage: test
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache curl jq
+    - mkdir -p $HOME/.kube
+    - echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+  script:
+    - echo "🧪 Running integration tests..."
+    - |
+      # Wait for pods to be ready
+      kubectl wait --for=condition=ready pod \
+        --selector=app=cloud-native-app \
+        --namespace $NAMESPACE \
+        --timeout=300s
+    - |
+      # Get application endpoint
+      INGRESS_HOST=$(kubectl get ingress cloud-native-app --namespace $NAMESPACE -o jsonpath='{.spec.rules[0].host}' || echo "localhost")
+      TARGET_URL="https://$INGRESS_HOST"
+      echo "🎯 Testing endpoint: $TARGET_URL"
+    - |
+      # Health check
+      echo "🔍 Running health check..."
+      HTTP_STATUS=$(curl -f -s -o /dev/null -w "%{http_code}" "$TARGET_URL/health" || echo "000")
+      if [ "$HTTP_STATUS" = "200" ]; then
+        echo "✅ Health check passed"
+      else
+        echo "❌ Health check failed with status: $HTTP_STATUS"
+        exit 1
+      fi
+    - |
+      # API tests
+      echo "🔍 Running API tests..."
+      curl -f "$TARGET_URL/api/version" || exit 1
+      curl -f "$TARGET_URL/api/status" || exit 1
+    - echo "✅ Integration tests completed"
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"
+    - if: $CI_COMMIT_REF_NAME == "develop"
+    - when: manual
+
+# Performance testing
+performance-test:
+  stage: test
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache curl jq
+    - mkdir -p $HOME/.kube
+    - echo "$KUBE_CONFIG" | base64 -d > $HOME/.kube/config
+    - chmod 600 $HOME/.kube/config
+    # Install k6
+    - sudo gpg -k
+    - sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+    - echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+    - sudo apt-get update
+    - sudo apt-get install k6
+  script:
+    - echo "⚡ Running performance tests..."
+    - |
+      # Get application endpoint
+      INGRESS_HOST=$(kubectl get ingress cloud-native-app --namespace $NAMESPACE -o jsonpath='{.spec.rules[0].host}' || echo "localhost")
+      TARGET_URL="https://$INGRESS_HOST"
+      echo "🎯 Testing endpoint: $TARGET_URL"
+    - |
+      # Run load test
+      echo "🏃 Running load test..."
+      k6 run --out json=load-test-results.json performance-testing/load-test.js \
+        --vus 50 \
+        --duration 2m \
+        --env TARGET_URL=$TARGET_URL || true
+    - |
+      # Run stress test
+      echo "💪 Running stress test..."
+      k6 run --out json=stress-test-results.json performance-testing/stress-test.js \
+        --vus 100 \
+        --duration 5m \
+        --env TARGET_URL=$TARGET_URL || true
+    - |
+      # Generate performance report
+      python3 performance-testing/generate-report.py \
+        --load-results load-test-results.json \
+        --stress-results stress-test-results.json \
+        --output performance-report.md || echo "Report generation failed"
+    - echo "✅ Performance tests completed"
+  artifacts:
+    paths:
+      - load-test-results.json
+      - stress-test-results.json
+      - performance-report.md
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"
+    - when: manual
+  allow_failure: true
+
+# Setup monitoring
+setup-monitoring:
+  stage: monitor
+  <<: *k8s_configuration
+  script:
+    - echo "📊 Setting up monitoring stack..."
+    - |
+      # Deploy Prometheus
+      if [ -d "monitoring/prometheus" ]; then
+        kubectl apply -f monitoring/prometheus/ --namespace $NAMESPACE
+        echo "✅ Prometheus deployed"
+      fi
+    - |
+      # Deploy Grafana
+      if [ -d "monitoring/grafana" ]; then
+        kubectl apply -f monitoring/grafana/ --namespace $NAMESPACE
+        echo "✅ Grafana deployed"
+      fi
+    - |
+      # Deploy Jaeger for tracing
+      if [ -d "monitoring/jaeger" ]; then
+        kubectl apply -f monitoring/jaeger/ --namespace $NAMESPACE
+        echo "✅ Jaeger deployed"
+      fi
+    - |
+      # Deploy Loki for logging
+      if [ -d "monitoring/loki" ]; then
+        kubectl apply -f monitoring/loki/ --namespace $NAMESPACE
+        echo "✅ Loki deployed"
+      fi
+    - |
+      # Deploy ServiceMonitors
+      if [ -f "monitoring/servicemonitor.yaml" ]; then
+        kubectl apply -f monitoring/servicemonitor.yaml --namespace $NAMESPACE
+        echo "✅ ServiceMonitors deployed"
+      fi
+    - |
+      # Setup Grafana dashboards
+      if [ -d "monitoring/grafana/dashboards" ]; then
+        kubectl apply -f monitoring/grafana/dashboards/ --namespace $NAMESPACE
+        echo "✅ Grafana dashboards deployed"
+      fi
+    - echo "✅ Monitoring setup completed"
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"
+    - when: manual
+
+# Cleanup resources
+cleanup:
+  stage: cleanup
+  <<: *k8s_configuration
+  script:
+    - echo "🧹 Cleaning up resources..."
+    - |
+      # Remove test deployments
+      kubectl delete deployment cloud-native-app-test --namespace $NAMESPACE --ignore-not-found=true
+      kubectl delete service cloud-native-app-test --namespace $NAMESPACE --ignore-not-found=true
+      kubectl delete ingress cloud-native-app-test --namespace $NAMESPACE --ignore-not-found=true
+    - |
+      # Clean up old pods
+      kubectl delete pods --namespace $NAMESPACE --field-selector=status.phase=Succeeded --ignore-not-found=true
+      kubectl delete pods --namespace $NAMESPACE --field-selector=status.phase=Failed --ignore-not-found=true
+    - |
+      # Clean up old jobs
+      kubectl delete jobs --namespace $NAMESPACE --field-selector=status.successful=1 --ignore-not-found=true
+    - echo "✅ Cleanup completed"
+  rules:
+    - when: manual
+  allow_failure: true
+
+# Notification job
+notify:
+  stage: .post
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "📢 Sending notifications..."
+    - |
+      # Generate deployment summary
+      cat > deployment-summary.md << EOF
+      # Cloud Native DevOps Deployment Summary
+      
+      ## Pipeline Information
+      - **Project**: $CI_PROJECT_NAME
+      - **Pipeline**: $CI_PIPELINE_URL
+      - **Commit**: $CI_COMMIT_SHA
+      - **Branch**: $CI_COMMIT_REF_NAME
+      - **Environment**: $CI_COMMIT_REF_NAME
+      - **Namespace**: $NAMESPACE
+      
+      ## Job Results
+      - **Validate**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      - **Build**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      - **Security Scan**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      - **Deploy**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      - **Test**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      - **Monitor**: $([ "$CI_JOB_STATUS" = "success" ] && echo "✅ Passed" || echo "❌ Failed")
+      
+      ## Image Information
+      - **Image**: $DOCKER_IMAGE:$IMAGE_TAG
+      
+      Generated on: $(date)
+      EOF
+    - |
+      # Send Slack notification
+      if [ -n "$SLACK_WEBHOOK_URL" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"🚀 Cloud Native DevOps deployment completed!\n\nProject: $CI_PROJECT_NAME\nBranch: $CI_COMMIT_REF_NAME\nEnvironment: $CI_COMMIT_REF_NAME\nStatus: $CI_PIPELINE_SOURCE\nPipeline: $CI_PIPELINE_URL\"}" \
+          "$SLACK_WEBHOOK_URL"
+        echo "✅ Slack notification sent"
+      fi
+    - |
+      # Send email notification
+      if [ -n "$NOTIFICATION_EMAIL" ] && [ -n "$SMTP_SERVER" ]; then
+        curl -X POST "$SMTP_SERVER" \
+          -H "From: noreply@space-invaders.local" \
+          -H "To: $NOTIFICATION_EMAIL" \
+          -H "Subject: Cloud Native DevOps Deployment - $CI_JOB_STATUS" \
+          -d @deployment-summary.md
+        echo "✅ Email notification sent"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - when: always
+  allow_failure: true

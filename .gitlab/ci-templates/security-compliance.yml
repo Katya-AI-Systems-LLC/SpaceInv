@@ -1,0 +1,468 @@
+# GitLab CI/CD Template for Security and Compliance
+# Provides comprehensive security scanning, compliance checking, and reporting
+
+stages:
+  - security-scan
+  - compliance-check
+  - security-report
+  - security-gate
+  - notification
+
+variables:
+  SECURITY_LEVEL: "standard"
+  COMPLIANCE_FRAMEWORKS: "GDPR,SOC2,ISO27001"
+  CREATE_REPORT: "true"
+  VULNERABILITY_THRESHOLD: "HIGH,CRITICAL"
+  COMPLIANCE_THRESHOLD: "95"
+
+# Cache configuration
+.cache_template: &cache_configuration
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-$CI_JOB_NAME"
+    paths:
+      - .venv/
+      - .cache/
+      - vendor/
+      - node_modules/
+
+# Static Application Security Testing (SAST)
+sast:
+  stage: security-scan
+  image: python:3.11-slim
+  <<: *cache_configuration
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+    paths:
+      - bandit-report.*
+      - safety-report.*
+      - semgrep-report.*
+      - sast-aggregated.json
+    expire_in: 1 week
+  variables:
+    SAST_BANDIT_EXCLUDED_PATHS: "*/tests/*,*/test/*"
+    SAST_SEMGREP_EXCLUDED_PATHS: "*/tests/*,*/test/*"
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install bandit safety semgrep trivy-python
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Running Static Application Security Testing..."
+    
+    # Run Bandit SAST
+    - bandit -r src/ -f json -o bandit-report.json || true
+    - bandit -r src/ -f txt -o bandit-report.txt || true
+    
+    # Run Safety dependency scanning
+    - safety check --json --output safety-report.json || true
+    - safety check --text --output safety-report.txt || true
+    
+    # Run Semgrep SAST
+    - semgrep --config=auto --json --output=semgrep-report.json src/ || true
+    - semgrep --config=auto --text --output=semgrep-report.txt src/ || true
+    
+    # Aggregate SAST results
+    - python scripts/security/aggregate-sast-results.py
+        --bandit-report bandit-report.json
+        --safety-report safety-report.json
+        --semgrep-report semgrep-report.json
+        --output sast-aggregated.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "src/**"
+        - "requirements.txt"
+        - "pyproject.toml"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "src/**"
+        - "requirements.txt"
+        - "pyproject.toml"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Container Security Scanning
+container-security:
+  stage: security-scan
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  <<: *cache_configuration
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+    paths:
+      - trivy-report.*
+      - grype-report.*
+      - container-aggregated.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - apk add --no-cache curl
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+    - curl -sfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+  script:
+    - echo "Running Container Security Scanning..."
+    
+    # Build container image
+    - docker build -t $DOCKER_IMAGE .
+    
+    # Run Trivy vulnerability scanner
+    - trivy image --format json --output trivy-report.json $DOCKER_IMAGE
+    - trivy image --format table --output trivy-report.txt $DOCKER_IMAGE
+    
+    # Run Grype vulnerability scanner
+    - grype $DOCKER_IMAGE -o json > grype-report.json
+    - grype $DOCKER_IMAGE -o table > grype-report.txt
+    
+    # Aggregate container security results
+    - python scripts/security/aggregate-container-results.py
+        --trivy-report trivy-report.json
+        --grype-report grype-report.json
+        --output container-aggregated.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "Dockerfile*"
+        - "docker-compose*.yml"
+        - "src/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "Dockerfile*"
+        - "docker-compose*.yml"
+        - "src/**"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Infrastructure Security Scanning
+infra-security:
+  stage: security-scan
+  image: python:3.11-slim
+  <<: *cache_configuration
+  artifacts:
+    reports:
+      sast: gl-infra-security-report.json
+    paths:
+      - checkov-report.*
+      - tfsec-report.*
+      - infra-aggregated.json
+    expire_in: 1 week
+  before_script:
+    - apt-get update -qq && apt-get install -y git wget
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install checkov
+    - wget -O tfsec https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-linux-amd64
+    - chmod +x tfsec
+    - mv tfsec /usr/local/bin/
+    - curl -L "$(curl -s https://api.github.com/repos/tenable/terrascan/releases/latest | grep -o 'https://.*terrascan_*_Linux_x86_64.tar.gz')" | tar xz
+  script:
+    - echo "Running Infrastructure Security Scanning..."
+    
+    # Run Checkov IaC scanning
+    - checkov -d terraform/ --framework terraform --output json --output-file-path checkov-report
+    - checkov -d terraform/ --framework terraform --output cli --output-file-path checkov-cli-report
+    
+    # Run TFSEC scanning
+    - tfsec terraform/ --format json --out tfsec-report.json
+    - tfsec terraform/ --format text --out tfsec-report.txt
+    
+    # Run Terrascan
+    - ./terrascan scan terraform/ -o json -f terrascan-report.json
+    - ./terrascan scan terraform/ -o cli -f terrascan-report.txt
+    
+    # Aggregate infrastructure security results
+    - python scripts/security/aggregate-infra-results.py
+        --checkov-report checkov-report/results.json
+        --tfsec-report tfsec-report.json
+        --terrascan-report terrascan-report.json
+        --output infra-aggregated.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "terraform/**"
+        - "ansible/**"
+        - "helm/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "terraform/**"
+        - "ansible/**"
+        - "helm/**"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Compliance Checking
+compliance-check:
+  stage: compliance-check
+  image: python:3.11-slim
+  <<: *cache_configuration
+  artifacts:
+    reports:
+      compliance: gl-compliance-report.json
+    paths:
+      - gdpr-compliance.json
+      - soc2-compliance.json
+      - iso27001-compliance.json
+      - pci-dss-compliance.json
+      - compliance-aggregated.json
+    expire_in: 1 month
+  dependencies:
+    - sast
+    - container-security
+    - infra-security
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install compliance-checker
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Running Compliance Checking..."
+    
+    # Download security reports
+    - cp sast/sast-aggregated.json . || true
+    - cp container-security/container-aggregated.json . || true
+    - cp infra-security/infra-aggregated.json . || true
+    
+    # Run GDPR compliance check
+    - python scripts/compliance/gdpr-check.py
+        --source-dir src/
+        --config-dir config/
+        --output gdpr-compliance.json
+    
+    # Run SOC2 compliance check
+    - python scripts/compliance/soc2-check.py
+        --source-dir src/
+        --config-dir config/
+        --security-reports ./
+        --output soc2-compliance.json
+    
+    # Run ISO27001 compliance check
+    - python scripts/compliance/iso27001-check.py
+        --source-dir src/
+        --config-dir config/
+        --security-reports ./
+        --output iso27001-compliance.json
+    
+    # Run PCI-DSS compliance check
+    - python scripts/compliance/pci-dss-check.py
+        --source-dir src/
+        --config-dir config/
+        --security-reports ./
+        --output pci-dss-compliance.json
+    
+    # Aggregate compliance results
+    - python scripts/compliance/aggregate-compliance-results.py
+        --gdpr-report gdpr-compliance.json
+        --soc2-report soc2-compliance.json
+        --iso27001-report iso27001-compliance.json
+        --pci-dss-report pci-dss-compliance.json
+        --frameworks "$COMPLIANCE_FRAMEWORKS"
+        --output compliance-aggregated.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Security Reporting
+security-report:
+  stage: security-report
+  image: python:3.11-slim
+  <<: *cache_configuration
+  artifacts:
+    paths:
+      - security-executive-report.html
+      - security-technical-report.html
+      - pdf-reports/
+    expire_in: 3 months
+  dependencies:
+    - sast
+    - container-security
+    - infra-security
+    - compliance-check
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install jinja2 weasyprint matplotlib seaborn
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Generating Security Reports..."
+    
+    # Download all security reports
+    - cp sast/sast-aggregated.json . || true
+    - cp container-security/container-aggregated.json . || true
+    - cp infra-security/infra-aggregated.json . || true
+    - cp compliance-check/compliance-aggregated.json . || true
+    
+    # Generate executive security report
+    - python scripts/security/generate-executive-report.py
+        --sast-report sast-aggregated.json
+        --container-report container-aggregated.json
+        --infra-report infra-aggregated.json
+        --compliance-report compliance-aggregated.json
+        --template templates/executive-security-report.html
+        --output security-executive-report.html
+    
+    # Generate technical security report
+    - python scripts/security/generate-technical-report.py
+        --sast-report sast-aggregated.json
+        --container-report container-aggregated.json
+        --infra-report infra-aggregated.json
+        --compliance-report compliance-aggregated.json
+        --template templates/technical-security-report.html
+        --output security-technical-report.html
+    
+    # Generate PDF reports
+    - python scripts/security/generate-pdf-reports.py
+        --html-dir .
+        --output-dir pdf-reports/
+  rules:
+    - if: $CREATE_REPORT == "true"
+    - when: manual
+      allow_failure: true
+
+# Security Gate
+security-gate:
+  stage: security-gate
+  image: python:3.11-slim
+  <<: *cache_configuration
+  dependencies:
+    - sast
+    - container-security
+    - infra-security
+    - compliance-check
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Evaluating Security Gate..."
+    
+    # Download security reports
+    - cp sast/sast-aggregated.json . || true
+    - cp container-security/container-aggregated.json . || true
+    - cp infra-security/infra-aggregated.json . || true
+    - cp compliance-check/compliance-aggregated.json . || true
+    
+    # Evaluate security gate
+    - python scripts/security/evaluate-security-gate.py
+        --sast-report sast-aggregated.json
+        --container-report container-aggregated.json
+        --infra-report infra-aggregated.json
+        --compliance-report compliance-aggregated.json
+        --thresholds security-gate-thresholds.json
+        --output security-gate-result.json
+    
+    # Check gate result
+    - GATE_STATUS=$(python -c "import json; print(json.load(open('security-gate-result.json')).get('gate_status', 'FAILED'))")
+    - if [ "$GATE_STATUS" != "PASSED" ]; then
+        echo "Security gate failed!"
+        cat security-gate-result.json
+        exit 1
+      fi
+    
+    - echo "Security gate passed!"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+
+# Notification
+notification:
+  stage: notification
+  image: alpine:latest
+  dependencies:
+    - sast
+    - container-security
+    - infra-security
+    - compliance-check
+    - security-gate
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "Sending Security Notifications..."
+    
+    # Download security reports
+    - cp sast/sast-aggregated.json . || true
+    - cp container-security/container-aggregated.json . || true
+    - cp infra-security/infra-aggregated.json . || true
+    - cp compliance-check/compliance-aggregated.json . || true
+    - cp security-gate/security-gate-result.json . || true
+    
+    # Extract metrics
+    - SAST_VULNS=$(python -c "import json; print(json.load(open('sast-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0")
+    - CONTAINER_VULNS=$(python -c "import json; print(json.load(open('container-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0")
+    - INFRA_VULNS=$(python -c "import json; print(json.load(open('infra-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0")
+    - COMPLIANCE_STATUS=$(python -c "import json; print(json.load(open('compliance-aggregated.json')).get('overall_status', 'FAILED'))" || echo "FAILED")
+    - GATE_STATUS=$(python -c "import json; print(json.load(open('security-gate-result.json')).get('gate_status', 'FAILED'))" || echo "FAILED")
+    
+    # Send Slack notification
+    - |
+      curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"Security and Compliance Scan Results:\n- SAST: $SAST_VULNS vulnerabilities\n- Container: $CONTAINER_VULNS vulnerabilities\n- Infrastructure: $INFRA_VULNS vulnerabilities\n- Compliance: $COMPLIANCE_STATUS\n- Security Gate: $GATE_STATUS\"}" \
+        "$SLACK_SECURITY_WEBHOOK" || true
+    
+    # Send email notification
+    - |
+      curl -X POST "https://api.mailgun.net/v3/$MAILGUN_DOMAIN/messages" \
+        -F "from=GitLab CI/CD <ci@$MAILGUN_DOMAIN>" \
+        -F "to=$SECURITY_EMAIL" \
+        -F "subject=Security Scan Results - $CI_PROJECT_NAME" \
+        -F "text=Security and Compliance Scan Results:\n\nRepository: $CI_PROJECT_NAME\nBranch: $CI_COMMIT_REF_NAME\nCommit: $CI_COMMIT_SHA\n\nResults:\n- SAST: $SAST_VULNS vulnerabilities\n- Container: $CONTAINER_VULNS vulnerabilities\n- Infrastructure: $INFRA_VULNS vulnerabilities\n- Compliance: $COMPLIANCE_STATUS\n- Security Gate: $GATE_STATUS\n\nReports are available in the artifacts." \
+        -F "api-key=$MAILGUN_API_KEY" || true
+  rules:
+    - if: always()
+  when: manual
+      allow_failure: true
+
+# Create Security Issue
+create-security-issue:
+  stage: notification
+  image: alpine:latest
+  dependencies:
+    - security-gate
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "Creating Security Issue..."
+    
+    # Download security gate result
+    - cp security-gate/security-gate-result.json . || true
+    
+    # Extract gate status
+    - GATE_STATUS=$(python -c "import json; print(json.load(open('security-gate-result.json')).get('gate_status', 'FAILED'))" || echo "FAILED")
+    
+    # Create issue if gate failed
+    - |
+      if [ "$GATE_STATUS" != "PASSED" ]; then
+        curl -X POST "https://gitlab.com/api/v4/projects/$CI_PROJECT_ID/issues" \
+          -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"title\": \"Security Gate Failed - $(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+            \"description\": \"## Security Gate Failed\n\n**Repository**: $CI_PROJECT_NAME\n**Branch**: $CI_COMMIT_REF_NAME\n**Commit**: $CI_COMMIT_SHA\n\n### Security Findings:\n- **SAST**: $(python -c "import json; print(json.load(open('sast-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0") vulnerabilities\n- **Container**: $(python -c "import json; print(json.load(open('container-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0") vulnerabilities\n- **Infrastructure**: $(python -c "import json; print(json.load(open('infra-aggregated.json')).get('total_vulnerabilities', 0))" || echo "0") vulnerabilities\n- **Compliance**: $(python -c "import json; print(json.load(open('compliance-aggregated.json')).get('overall_status', 'FAILED'))" || echo "FAILED")\n\n### Gate Results:\n\`\`\`json\n$(cat security-gate-result.json)\n\`\`\`\n\n### Action Required:\nPlease review the security findings and address the critical issues before merging.\n\n**Security Reports**: Available in the pipeline artifacts.\",
+            \"labels\": [\"security\", \"compliance\", \"high-priority\"]
+          }" || true
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - when: manual
+      allow_failure: true

@@ -1,0 +1,899 @@
+# GitLab CI/CD Template for Performance and Scalability Testing
+# Provides comprehensive performance testing, scalability analysis, and optimization
+
+stages:
+  - performance-setup
+  - performance-testing
+  - performance-analysis
+  - performance-gate
+  - notification
+
+variables:
+  TEST_TYPE: "load"
+  ENVIRONMENT: "staging"
+  CONCURRENT_USERS: "100"
+  TEST_DURATION: "300"
+  RAMP_UP_TIME: "60"
+  CREATE_REPORT: "true"
+  PERFORMANCE_THRESHOLD_FILE: "performance-thresholds.json"
+
+# Cache configuration
+.cache_template: &cache_configuration
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-$CI_JOB_NAME"
+    paths:
+      - .venv/
+      - .cache/
+      - vendor/
+      - node_modules/
+
+# Performance Testing Setup
+performance-setup:
+  stage: performance-setup
+  image: python:3.11-slim
+  <<: *cache_configuration
+  artifacts:
+    reports:
+      junit: performance-setup/junit.xml
+    paths:
+      - performance-test-config.json
+      - performance-test-locustfile.py
+      - performance-thresholds.json
+    expire_in: 1 hour
+  before_script:
+    - apt-get update -qq && apt-get install -y git curl
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip
+    - pip install locust pytest pytest-html pytest-benchmark
+    - pip install k6 influxdb-client prometheus-client
+    - pip install matplotlib seaborn pandas jinja2
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Setting up performance testing environment..."
+    
+    # Determine target URL based on environment
+    - |
+      if [ "$ENVIRONMENT" = "production" ]; then
+        TARGET_URL="https://space-invaders.com"
+      elif [ "$ENVIRONMENT" = "staging" ]; then
+        TARGET_URL="https://staging.space-invaders.com"
+      else
+        TARGET_URL="http://localhost:8080"
+      fi
+    
+    # Create test configuration
+    - |
+      cat > performance-test-config.json << EOF
+      {
+        "test_type": "$TEST_TYPE",
+        "environment": "$ENVIRONMENT",
+        "target_url": "$TARGET_URL",
+        "concurrent_users": $CONCURRENT_USERS,
+        "test_duration": $TEST_DURATION,
+        "ramp_up_time": $RAMP_UP_TIME,
+        "endpoints": [
+          {
+            "name": "home_page",
+            "url": "$TARGET_URL/",
+            "method": "GET",
+            "weight": 30
+          },
+          {
+            "name": "api_health",
+            "url": "$TARGET_URL/api/health",
+            "method": "GET",
+            "weight": 20
+          },
+          {
+            "name": "api_users",
+            "url": "$TARGET_URL/api/users",
+            "method": "GET",
+            "weight": 25
+          },
+          {
+            "name": "api_games",
+            "url": "$TARGET_URL/api/games",
+            "method": "GET",
+            "weight": 25
+          }
+        ],
+        "thresholds": {
+          "response_time_p95": 2000,
+          "response_time_p99": 5000,
+          "error_rate": 0.01,
+          "throughput_min": 100
+        }
+      }
+      EOF
+    
+    # Create performance thresholds
+    - |
+      cat > performance-thresholds.json << EOF
+      {
+        "load_testing": {
+          "response_time_p95_max": 2000,
+          "response_time_p99_max": 5000,
+          "error_rate_max": 0.01,
+          "throughput_min": 100,
+          "cpu_usage_max": 80,
+          "memory_usage_max": 85
+        },
+        "stress_testing": {
+          "response_time_p95_max": 3000,
+          "response_time_p99_max": 8000,
+          "error_rate_max": 0.05,
+          "throughput_min": 50,
+          "cpu_usage_max": 90,
+          "memory_usage_max": 90
+        },
+        "spike_testing": {
+          "response_time_p95_max": 2500,
+          "response_time_p99_max": 6000,
+          "error_rate_max": 0.03,
+          "throughput_min": 80,
+          "cpu_usage_max": 85,
+          "memory_usage_max": 88
+        },
+        "endurance_testing": {
+          "response_time_p95_max": 1500,
+          "response_time_p99_max": 4000,
+          "error_rate_max": 0.005,
+          "throughput_min": 120,
+          "cpu_usage_max": 75,
+          "memory_usage_max": 80
+        },
+        "scalability_testing": {
+          "response_time_p95_max": 2000,
+          "response_time_p99_max": 5000,
+          "error_rate_max": 0.01,
+          "throughput_min": 100,
+          "cpu_usage_max": 80,
+          "memory_usage_max": 85
+        }
+      }
+      EOF
+    
+    # Create Locustfile based on test type
+    - |
+      cat > performance-test-locustfile.py << 'EOF'
+      from locust import HttpUser, task, between
+      import json
+      import random
+      import time
+      
+      # Load test configuration
+      with open('performance-test-config.json', 'r') as f:
+          config = json.load(f)
+      
+      class PerformanceTestUser(HttpUser):
+          wait_time = between(1, 3)
+          
+          def on_start(self):
+              self.endpoints = config['endpoints']
+              self.test_type = config['test_type']
+          
+          @task(30)
+          def home_page(self):
+              """Load home page"""
+              endpoint = random.choice([e for e in self.endpoints if e['name'] == 'home_page'])
+              self.client.get(endpoint['url'])
+          
+          @task(20)
+          def api_health(self):
+              """Check API health"""
+              endpoint = random.choice([e for e in self.endpoints if e['name'] == 'api_health'])
+              self.client.get(endpoint['url'])
+          
+          @task(25)
+          def api_users(self):
+              """Load users API"""
+              endpoint = random.choice([e for e in self.endpoints if e['name'] == 'api_users'])
+              self.client.get(endpoint['url'])
+          
+          @task(25)
+          def api_games(self):
+              """Load games API"""
+              endpoint = random.choice([e for e in self.endpoints if e['name'] == 'api_games'])
+              self.client.get(endpoint['url'])
+      EOF
+    
+    # Create test-specific Locustfile for stress testing
+    - |
+      if [ "$TEST_TYPE" = "stress" ]; then
+        cat > stress-test-locustfile.py << 'EOF'
+        from locust import HttpUser, task, between
+        import json
+        import random
+        import concurrent.futures
+        
+        with open('performance-test-config.json', 'r') as f:
+            config = json.load(f)
+        
+        class StressTestUser(HttpUser):
+            wait_time = between(0.1, 0.5)
+            
+            def on_start(self):
+                self.endpoints = config['endpoints']
+            
+            @task(40)
+            def heavy_requests(self):
+                """Heavy API requests"""
+                for endpoint in self.endpoints:
+                    self.client.get(endpoint['url'])
+            
+            @task(30)
+            def concurrent_requests(self):
+                """Concurrent requests"""
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = []
+                    for endpoint in self.endpoints:
+                        futures.append(executor.submit(self.client.get, endpoint['url']))
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+            
+            @task(30)
+            def resource_intensive(self):
+                """Resource intensive operations"""
+                endpoint = random.choice(self.endpoints)
+                payload = {"data": "x" * 10000}
+                self.client.post(endpoint['url'].replace('/api/', '/api/heavy/'), json=payload)
+        EOF
+      fi
+    
+    # Create spike test Locustfile
+    - |
+      if [ "$TEST_TYPE" = "spike" ]; then
+        cat > spike-test-locustfile.py << 'EOF'
+        from locust import HttpUser, task, between
+        import json
+        import random
+        
+        with open('performance-test-config.json', 'r') as f:
+            config = json.load(f)
+        
+        class SpikeTestUser(HttpUser):
+            wait_time = between(0.5, 2)
+            
+            def on_start(self):
+                self.endpoints = config['endpoints']
+            
+            @task(50)
+            def normal_load(self):
+                """Normal load"""
+                endpoint = random.choice(self.endpoints)
+                self.client.get(endpoint['url'])
+            
+            @task(50)
+            def spike_load(self):
+                """Spike load - more aggressive"""
+                for endpoint in self.endpoints:
+                    self.client.get(endpoint['url'])
+                    self.client.post(endpoint['url'].replace('/api/', '/api/create/'), json={"test": "data"})
+        EOF
+      fi
+    
+    # Create endurance test Locustfile
+    - |
+      if [ "$TEST_TYPE" = "endurance" ]; then
+        cat > endurance-test-locustfile.py << 'EOF'
+        from locust import HttpUser, task, between
+        import json
+        import random
+        import time
+        
+        with open('performance-test-config.json', 'r') as f:
+            config = json.load(f)
+        
+        class EnduranceTestUser(HttpUser):
+            wait_time = between(2, 5)
+            
+            def on_start(self):
+                self.endpoints = config['endpoints']
+                self.session_start = time.time()
+            
+            @task(25)
+            def sustained_load(self):
+                """Sustained load"""
+                endpoint = random.choice(self.endpoints)
+                self.client.get(endpoint['url'])
+            
+            @task(25)
+            def mixed_operations(self):
+                """Mixed operations"""
+                endpoint = random.choice(self.endpoints)
+                method = random.choice(['GET', 'POST'])
+                if method == 'GET':
+                    self.client.get(endpoint['url'])
+                else:
+                    self.client.post(endpoint['url'].replace('/api/', '/api/create/'), json={"test": "data"})
+            
+            @task(25)
+            def resource_usage(self):
+                """Resource usage patterns"""
+                endpoint = random.choice(self.endpoints)
+                self.client.get(endpoint['url'])
+                time.sleep(random.uniform(0.5, 2))
+                self.client.get(endpoint['url'] + '/details')
+            
+            @task(25)
+            def memory_stress(self):
+                """Memory stress patterns"""
+                endpoint = random.choice(self.endpoints)
+                self.client.get(endpoint['url'] + '?limit=1000')
+        EOF
+      fi
+    
+    # Create scalability test Locustfile
+    - |
+      if [ "$TEST_TYPE" = "scalability" ]; then
+        cat > scalability-test-locustfile.py << 'EOF'
+        from locust import HttpUser, task, between
+        import json
+        import random
+        import concurrent.futures
+        
+        with open('performance-test-config.json', 'r') as f:
+            config = json.load(f)
+        
+        class ScalabilityTestUser(HttpUser):
+            wait_time = between(1, 3)
+            
+            def on_start(self):
+                self.endpoints = config['endpoints']
+            
+            @task(30)
+            def basic_operations(self):
+                """Basic operations"""
+                endpoint = random.choice(self.endpoints)
+                self.client.get(endpoint['url'])
+            
+            @task(30)
+            def data_intensive(self):
+                """Data intensive operations"""
+                endpoint = random.choice([e for e in self.endpoints if 'api' in e['url']])
+                self.client.get(endpoint['url'] + '?limit=100')
+            
+            @task(20)
+            def concurrent_operations(self):
+                """Concurrent operations"""
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    futures = []
+                    for endpoint in self.endpoints[:3]:
+                        futures.append(executor.submit(self.client.get, endpoint['url']))
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+            
+            @task(20)
+            def write_operations(self):
+                """Write operations"""
+                endpoint = random.choice([e for e in self.endpoints if 'api' in e['url']])
+                self.client.post(endpoint['url'].replace('/api/', '/api/create/'), json={"test": "data"})
+        EOF
+      fi
+    
+    # Verify setup
+    - python -c "import json; print('Performance testing setup completed')"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH
+      changes:
+        - "src/**"
+        - "tests/**"
+        - "docker-compose*.yml"
+        - "k8s/**"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - "src/**"
+        - "tests/**"
+        - "docker-compose*.yml"
+        - "k8s/**"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: manual
+      allow_failure: true
+
+# Load Testing
+load-testing:
+  stage: performance-testing
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: performance-setup
+  artifacts:
+    reports:
+      junit: load-testing/junit.xml
+    paths:
+      - load-test-report.html
+      - load-test-results.csv
+      - load-test-metrics.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  services:
+    - name: docker:24.0.5-dind
+      command: ["--tls=false"]
+  before_script:
+    - apt-get update -qq && apt-get install -y docker.io
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install locust pytest matplotlib seaborn pandas
+  script:
+    - echo "Starting load testing..."
+    
+    # Download test configuration
+    - cp performance-setup/performance-test-config.json .
+    - cp performance-setup/performance-test-locustfile.py .
+    
+    # Start application services
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    
+    # Run Locust load testing
+    - |
+      locust -f performance-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users $CONCURRENT_USERS \
+        --spawn-rate $(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) // 10)") \
+        --run-time $TEST_DURATION \
+        --html load-test-report.html \
+        --csv load-test-results.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+    
+    # Extract metrics
+    - |
+      python scripts/performance/extract-locust-metrics.py \
+        --csv-file load-test-results.csv \
+        --output load-test-metrics.json
+    
+    # Stop application services
+    - docker-compose -f docker-compose.test.yml down
+  after_script:
+    - echo "Load testing completed"
+  rules:
+    - if: $TEST_TYPE == "load" || $TEST_TYPE == "scalability"
+    - when: manual
+      allow_failure: true
+
+# Stress Testing
+stress-testing:
+  stage: performance-testing
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: performance-setup
+  artifacts:
+    reports:
+      junit: stress-testing/junit.xml
+    paths:
+      - stress-test-report.html
+      - stress-test-results.csv
+      - stress-test-metrics.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  services:
+    - name: docker:24.0.5-dind
+      command: ["--tls=false"]
+  before_script:
+    - apt-get update -qq && apt-get install -y docker.io
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install locust pytest matplotlib seaborn pandas
+  script:
+    - echo "Starting stress testing..."
+    
+    # Download test configuration
+    - cp performance-setup/performance-test-config.json .
+    - cp performance-setup/stress-test-locustfile.py .
+    
+    # Start application services
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    
+    # Run stress test with higher user count
+    - |
+      STRESS_USERS=$(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) * 2)")
+      locust -f stress-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users $STRESS_USERS \
+        --spawn-rate $(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) // 5)") \
+        --run-time $TEST_DURATION \
+        --html stress-test-report.html \
+        --csv stress-test-results.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+    
+    # Extract metrics
+    - |
+      python scripts/performance/extract-locust-metrics.py \
+        --csv-file stress-test-results.csv \
+        --output stress-test-metrics.json
+    
+    # Stop application services
+    - docker-compose -f docker-compose.test.yml down
+  rules:
+    - if: $TEST_TYPE == "stress"
+    - when: manual
+      allow_failure: true
+
+# Spike Testing
+spike-testing:
+  stage: performance-testing
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: performance-setup
+  artifacts:
+    reports:
+      junit: spike-testing/junit.xml
+    paths:
+      - spike-*.html
+      - spike-*.csv
+      - spike-test-metrics.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  services:
+    - name: docker:24.0.5-dind
+      command: ["--tls=false"]
+  before_script:
+    - apt-get update -qq && apt-get install -y docker.io
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install locust pytest matplotlib seaborn pandas
+  script:
+    - echo "Starting spike testing..."
+    
+    # Download test configuration
+    - cp performance-setup/performance-test-config.json .
+    - cp performance-setup/spike-test-locustfile.py .
+    
+    # Start application services
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    
+    # Run spike test with varying user count
+    - |
+      echo "Starting baseline load..."
+      locust -f spike-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users 50 \
+        --spawn-rate 10 \
+        --run-time 60 \
+        --html spike-baseline.html \
+        --csv spike-baseline.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+      
+      echo "Starting spike load..."
+      SPIKE_USERS=$(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) * 3)")
+      locust -f spike-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users $SPIKE_USERS \
+        --spawn-rate $(python -c "import json; print(json.load(open('performance-test-config.json'))['concurrent_users'])") \
+        --run-time 120 \
+        --html spike-spike.html \
+        --csv spike-spike.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+      
+      echo "Returning to baseline..."
+      locust -f spike-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users 50 \
+        --spawn-rate 10 \
+        --run-time 60 \
+        --html spike-recovery.html \
+        --csv spike-recovery.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+      
+      # Combine results
+      - |
+        python scripts/performance/combine-spike-results.py \
+          --baseline-file spike-baseline.csv \
+          --spike-file spike-spike.csv \
+          --recovery-file spike-recovery.csv \
+          --output spike-test-results.csv
+      
+      # Extract metrics
+      - |
+        python scripts/performance/extract-locust-metrics.py \
+          --csv-file spike-test-results.csv \
+          --output spike-test-metrics.json
+    
+    # Stop application services
+    - docker-compose -f docker-compose.test.yml down
+  rules:
+    - if: $TEST_TYPE == "spike"
+    - when: manual
+      allow_failure: true
+
+# Endurance Testing
+endurance-testing:
+  stage: performance-testing
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: performance-setup
+  artifacts:
+    reports:
+      junit: endurance-testing/junit.xml
+    paths:
+      - endurance-test-report.html
+      - endurance-test-results.csv
+      - endurance-test-metrics.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  services:
+    - name: docker:24.0.5-dind
+      command: ["--tls=false"]
+  before_script:
+    - apt-get update -qq && apt-get install -y docker.io
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install locust pytest matplotlib seaborn pandas
+  script:
+    - echo "Starting endurance testing..."
+    
+    # Download test configuration
+    - cp performance-setup/performance-test-config.json .
+    - cp performance-setup/endurance-test-locustfile.py .
+    
+    # Start application services
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    
+    # Run endurance test for extended period
+    - |
+      ENDURANCE_DURATION=3600  # 1 hour
+      locust -f endurance-test-locustfile.py \
+        --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+        --users $CONCURRENT_USERS \
+        --spawn-rate $(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) // 20)") \
+        --run-time $ENDURANCE_DURATION \
+        --html endurance-test-report.html \
+        --csv endurance-test-results.csv \
+        --headless \
+        --exit-code-on-error 1 || true
+      
+      # Extract metrics
+      - |
+        python scripts/performance/extract-locust-metrics.py \
+          --csv-file endurance-test-results.csv \
+          --output endurance-test-metrics.json
+    
+    # Stop application services
+    - docker-compose -f docker-compose.test.yml down
+  rules:
+    - if: $TEST_TYPE == "endurance"
+    - when: manual
+      allow_failure: true
+
+# Scalability Testing
+scalability-testing:
+  stage: performance-testing
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: performance-setup
+  artifacts:
+    reports:
+      junit: scalability-testing/junit.xml
+    paths:
+      - scalability-*.html
+      - scalability-*.csv
+      - scalability-test-metrics.json
+    expire_in: 1 week
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+  services:
+    - name: docker:24.0.5-dind
+      command: ["--tls=false"]
+  before_script:
+    - apt-get update -qq && apt-get install -y docker.io
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install locust pytest matplotlib seaborn pandas
+  script:
+    - echo "Starting scalability testing..."
+    
+    # Download test configuration
+    - cp performance-setup/performance-test-config.json .
+    - cp performance-setup/scalability-test-locustfile.py .
+    
+    # Start application services
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30
+    
+    # Test with different user levels
+    - |
+      for users in 50 100 200 500 1000; do
+        echo "Testing with $users users..."
+        locust -f scalability-test-locustfile.py \
+          --host $(python -c "import json; print(json.load(open('performance-test-config.json'))['target_url'])") \
+          --users $users \
+          --spawn-rate $(python -c "import json; print(int(json.load(open('performance-test-config.json'))['concurrent_users']) // 10)") \
+          --run-time 300 \
+          --html scalability-report-$users.html \
+          --csv scalability-results-$users.csv \
+          --headless \
+          --exit-code-on-error 1 || true
+      done
+    
+    # Combine scalability results
+    - |
+      python scripts/performance/combine-scalability-results.py \
+        --user-levels 50 100 200 500 1000 \
+        --output scalability-test-results.csv
+    
+    # Extract metrics
+    - |
+      python scripts/performance/extract-locust-metrics.py \
+        --csv-file scalability-test-results.csv \
+        --output scalability-test-metrics.json
+    
+    # Stop application services
+    - docker-compose -f docker-compose.test.yml down
+  rules:
+    - if: $TEST_TYPE == "scalability"
+    - when: manual
+      allow_failure: true
+
+# Performance Analysis
+performance-analysis:
+  stage: performance-analysis
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [load-testing, stress-testing, spike-testing, endurance-testing, scalability-testing]
+  artifacts:
+    reports:
+      junit: performance-analysis/junit.xml
+    paths:
+      - performance-analysis.json
+      - performance-summary.json
+      - performance-report.html
+      - performance-report.pdf
+    expire_in: 3 months
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install matplotlib seaborn pandas jinja2 weasyprint
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Analyzing performance results..."
+    
+    # Download all test results
+    - mkdir -p test-results
+    - cp load-testing/* test-results/ 2>/dev/null || true
+    - cp stress-testing/* test-results/ 2>/dev/null || true
+    - cp spike-testing/* test-results/ 2>/dev/null || true
+    - cp endurance-testing/* test-results/ 2>/dev/null || true
+    - cp scalability-testing/* test-results/ 2>/dev/null || true
+    
+    # Analyze performance results
+    - |
+      python scripts/performance/analyze-performance-results.py \
+        --results-dir test-results/ \
+        --test-type $TEST_TYPE \
+        --output performance-analysis.json
+    
+    # Generate summary
+    - |
+      python scripts/performance/generate-performance-summary.py \
+        --analysis-file performance-analysis.json \
+        --output performance-summary.json
+    
+    # Generate performance report
+    - |
+      python scripts/performance/generate-performance-report.py \
+        --analysis-file performance-analysis.json \
+        --template templates/performance-report.html \
+        --output performance-report.html
+    
+    # Generate PDF report
+    - |
+      python scripts/performance/generate-pdf-report.py \
+        --html-file performance-report.html \
+        --output performance-report.pdf
+  rules:
+    - if: $CREATE_REPORT == "true"
+    - when: manual
+      allow_failure: true
+
+# Performance Gate
+performance-gate:
+  stage: performance-gate
+  image: python:3.11-slim
+  <<: *cache_configuration
+  needs: [performance-analysis]
+  before_script:
+    - apt-get update -qq && apt-get install -y git
+    - python -m venv .venv
+    - source .venv/bin/activate
+    - pip install -r requirements.txt || true
+  script:
+    - echo "Evaluating performance gate..."
+    
+    # Download performance analysis
+    - cp performance-analysis/performance-analysis.json .
+    - cp performance-setup/performance-thresholds.json .
+    
+    # Evaluate performance gate
+    - |
+      python scripts/performance/evaluate-performance-gate.py \
+        --analysis-file performance-analysis.json \
+        --thresholds performance-thresholds.json \
+        --output performance-gate-result.json
+    
+    # Check gate result
+    - |
+      GATE_STATUS=$(python -c "import json; print(json.load(open('performance-gate-result.json')).get('gate_status', 'FAILED'))")
+      if [ "$GATE_STATUS" != "PASSED" ]; then
+        echo "Performance gate failed!"
+        cat performance-gate-result.json
+        exit 1
+      fi
+      
+      echo "Performance gate passed!"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: manual
+
+# Notification
+notification:
+  stage: notification
+  image: alpine:latest
+  needs: [performance-analysis, performance-gate]
+  if: always()
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "Sending performance notifications..."
+    
+    # Download performance results
+    - mkdir -p performance-results
+    - cp performance-analysis/* performance-results/ 2>/dev/null || true
+    - cp performance-gate/* performance-results/ 2>/dev/null || true
+    
+    # Extract metrics
+    - |
+      TOTAL_VULNS=$(python -c "import json; print(json.load(open('performance-results/performance-summary.json')).get('total_vulnerabilities', 0))" || echo "0")
+      CRITICAL_VULNS=$(python -c "import json; print(json.load(open('performance-results/performance-summary.json')).get('critical_vulnerabilities', 0))" || echo "0")
+      COMPLIANCE_STATUS=$(python -c "import json; print(json.load(open('performance-results/performance-summary.json')).get('compliance_status', 'FAILED'))" || echo "FAILED")
+      GATE_STATUS=$(python -c "import json; print(json.load(open('performance-results/performance-gate-result.json')).get('gate_status', 'FAILED'))" || echo "FAILED")
+    
+    # Send Slack notification
+    - |
+      curl -X POST -H 'Content-type: application/json' \
+        --data "{\"text\":\"Performance Test Results ($TEST_TYPE):\n- Environment: $ENVIRONMENT\n- Concurrent Users: $CONCURRENT_USERS\n- Test Duration: $TEST_DURATIONs\n- Performance Gate: $GATE_STATUS\"}" \
+        "$SLACK_PERFORMANCE_WEBHOOK" || true
+    
+    # Send email notification
+    - |
+      curl -X POST "https://api.mailgun.net/v3/$MAILGUN_DOMAIN/messages" \
+        -F "from=GitLab CI/CD <ci@$MAILGUN_DOMAIN>" \
+        -F "to=$PERFORMANCE_EMAIL" \
+        -F "subject=Performance Test Results - $CI_PROJECT_NAME" \
+        -F "text=Performance Test Results ($TEST_TYPE):\n\nRepository: $CI_PROJECT_NAME\nBranch: $CI_COMMIT_REF_NAME\nCommit: $CI_COMMIT_SHA\n\nTest Configuration:\n- Environment: $ENVIRONMENT\n- Test Type: $TEST_TYPE\n- Concurrent Users: $CONCURRENT_USERS\n- Test Duration: $TEST_DURATIONs\n- Ramp Up Time: $RAMP_UP_TIMEs\n\nResults:\n- Performance Gate: $GATE_STATUS\n\nReports are available in the artifacts." \
+        -F "api-key=$MAILGUN_API_KEY" || true
+    
+    # Create performance issue if gate failed
+    - |
+      if [ "$GATE_STATUS" != "PASSED" ]; then
+        curl -X POST "https://gitlab.com/api/v4/projects/$CI_PROJECT_ID/issues" \
+          -H "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"title\": \"Performance Gate Failed - $(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+            \"description\": \"## Performance Gate Failed\n\n**Repository**: $CI_PROJECT_NAME\n**Branch**: $CI_COMMIT_REF_NAME\n**Commit**: $CI_COMMIT_SHA\n\n### Test Configuration:\n- **Test Type**: $TEST_TYPE\n- **Environment**: $ENVIRONMENT\n- **Concurrent Users**: $CONCURRENT_USERS\n- **Test Duration**: $TEST_DURATIONs\n- **Ramp Up Time**: $RAMP_UP_TIMEs\n\n### Performance Results:\n- **Total Vulnerabilities**: $TOTAL_VULNS\n- **Critical Vulnerabilities**: $CRITICAL_VULNS\n- **Compliance Status**: $COMPLIANCE_STATUS\n\n### Gate Results:\n\`\`\`json\n$(cat performance-gate-result.json)\n\`\`\`\n\n### Action Required:\nPlease review the performance results and address the performance issues before merging.\n\n**Performance Reports**: Available in the pipeline artifacts.\",
+            \"labels\": [\"performance\", \"scalability\", \"high-priority\"]
+          }" || true
+      fi
+  rules:
+    - if: always()
+  when: manual
+      allow_failure: true

@@ -1,0 +1,530 @@
+---
+# Advanced Kubernetes Deployment Template for Space Invaders
+# Comprehensive production-ready deployment with security, monitoring, and scaling
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+    deployment.kubernetes.io/revision: "1"
+    kubernetes.io/change-cause: "{{ .Release.Revision }} - {{ .Release.Time.Format "2006-01-02T15:04:05Z" }}"
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable | default 25 }}%
+      maxSurge: {{ .Values.rollingUpdate.maxSurge | default 25 }}%
+  selector:
+    matchLabels:
+      {{- include "space-invaders.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: application
+  template:
+    metadata:
+      labels:
+        {{- include "space-invaders.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: application
+        app.kubernetes.io/part-of: space-invaders
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.podAnnotations }}
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.service.port }}"
+        prometheus.io/path: "/metrics"
+        app.kubernetes.io/version: "{{ .Chart.AppVersion }}"
+    spec:
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "space-invaders.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      
+      # Init containers
+      {{- if .Values.initContainers }}
+      initContainers:
+        {{- toYaml .Values.initContainers | nindent 8 }}
+      {{- end }}
+      
+      # Main application container
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 10 }}
+        image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        
+        # Ports
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        
+        # Environment variables
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        {{- with .Values.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        
+        # Environment from ConfigMaps and Secrets
+        envFrom:
+        - configMapRef:
+            name: {{ include "space-invaders.fullname" . }}-config
+            optional: true
+        - secretRef:
+            name: {{ include "space-invaders.fullname" . }}-secrets
+            optional: true
+        {{- with .Values.envFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        
+        # Liveness probe
+        livenessProbe:
+          {{- toYaml .Values.livenessProbe | nindent 10 }}
+        
+        # Readiness probe
+        readinessProbe:
+          {{- toYaml .Values.readinessProbe | nindent 10 }}
+        
+        # Startup probe
+        {{- if .Values.startupProbe }}
+        startupProbe:
+          {{- toYaml .Values.startupProbe | nindent 10 }}
+        {{- end }}
+        
+        # Resources
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        
+        # Volume mounts
+        volumeMounts:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          mountPath: /app/data
+        {{- end }}
+        {{- if .Values.configMaps.enabled }}
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        {{- end }}
+        {{- with .Values.volumeMounts }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        
+        # Lifecycle hooks
+        {{- if .Values.lifecycle }}
+        lifecycle:
+          {{- toYaml .Values.lifecycle | nindent 10 }}
+        {{- end }}
+      
+      # Sidecar containers
+      {{- if .Values.sidecars }}
+      {{- toYaml .Values.sidecars | nindent 6 }}
+      {{- end }}
+      
+      # Volumes
+      volumes:
+      {{- if .Values.persistence.enabled }}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "space-invaders.fullname" . }}-data
+      {{- end }}
+      {{- if .Values.configMaps.enabled }}
+      - name: config
+        configMap:
+          name: {{ include "space-invaders.fullname" . }}-config
+      {{- end }}
+      {{- with .Values.volumes }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      
+      # Node selector
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
+      # Affinity
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
+      # Tolerations
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+
+---
+# Service for the application
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.service.annotations }}
+    {{- toYaml .Values.service.annotations | nindent 4 }}
+    {{- end }}
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.service.port }}"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - port: {{ .Values.service.port }}
+    targetPort: http
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: metrics
+    protocol: TCP
+    name: metrics
+  selector:
+    {{- include "space-invaders.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: application
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "space-invaders.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+data:
+  {{- if .Values.configMaps.enabled }}
+  {{- toYaml .Values.configMaps.data | nindent 2 }}
+  {{- end }}
+  app.yaml: |
+    server:
+      port: {{ .Values.service.targetPort }}
+      host: "0.0.0.0"
+      gracefulShutdownTimeout: 30
+    
+    database:
+      host: {{ .Values.postgresql.enabled | ternary (printf "%s-postgresql" (include "space-invaders.fullname" .)) "localhost" }}
+      port: 5432
+      name: spaceinvaders
+      sslMode: require
+    
+    redis:
+      host: {{ .Values.redis.enabled | ternary (printf "%s-redis-master" (include "space-invaders.fullname" .)) "localhost" }}
+      port: 6379
+      db: 0
+    
+    logging:
+      level: {{ .Values.logging.level | default "info" }}
+      format: {{ .Values.logging.format | default "json" }}
+      output: {{ .Values.logging.output | default "stdout" }}
+    
+    monitoring:
+      enabled: {{ .Values.monitoring.enabled }}
+      port: 9090
+      path: /metrics
+    
+    security:
+      cors:
+        enabled: true
+        origins: ["*"]
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        headers: ["*"]
+      rateLimit:
+        enabled: true
+        requests: 100
+        window: 60
+
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "space-invaders.fullname" . }}-secrets
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: secret
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+type: Opaque
+data:
+  {{- if .Values.secrets.enabled }}
+  {{- range $key, $value := .Values.secrets.data }}
+  {{ $key }}: {{ $value | b64enc }}
+  {{- end }}
+  {{- end }}
+  database-password: {{ .Values.postgresql.auth.postgresPassword | default "changeme" | b64enc }}
+  redis-password: {{ .Values.redis.auth.password | default "changeme" | b64enc }}
+  jwt-secret: {{ .Values.secrets.data.JWT_SECRET | default "changeme" | b64enc }}
+
+---
+# Persistent Volume Claim for application data
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "space-invaders.fullname" . }}-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.persistence.annotations }}
+    {{- toYaml .Values.persistence.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- end }}
+{{- end }}
+
+---
+# Horizontal Pod Autoscaler
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: autoscaler
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "space-invaders.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+  {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+  {{- end }}
+  {{- with .Values.autoscaling.behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+---
+# Pod Disruption Budget
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdb
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  {{- if .Values.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "space-invaders.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: application
+{{- end }}
+
+---
+# Network Policy
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: network-policy
+    app.kubernetes.io/part-of: space-invaders
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "space-invaders.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: application
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  {{- toYaml .Values.networkPolicy.ingress | nindent 4 }}
+  egress:
+  {{- toYaml .Values.networkPolicy.egress | nindent 4 }}
+{{- end }}
+
+---
+# Service Monitor for Prometheus
+{{- if .Values.monitoring.enabled && .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Values.monitoring.serviceMonitor.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: space-invaders
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+    {{- with .Values.monitoring.serviceMonitor.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "space-invaders.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: service
+  endpoints:
+  - port: metrics
+    interval: {{ .Values.monitoring.serviceMonitor.interval }}
+    scrapeTimeout: {{ .Values.monitoring.serviceMonitor.scrapeTimeout }}
+    path: /metrics
+{{- end }}
+
+---
+# Prometheus Rule
+{{- if .Values.monitoring.enabled && .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "space-invaders.fullname" . }}
+  namespace: {{ .Values.monitoring.prometheusRule.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "space-invaders.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+    app.kubernetes.io/part-of: space-invaders
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- if .Values.commonAnnotations }}
+    {{- toYaml .Values.commonAnnotations | nindent 4 }}
+    {{- end }}
+    {{- with .Values.monitoring.prometheusRule.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+  - name: space-invaders.rules
+    rules:
+    - alert: SpaceInvadersDown
+      expr: up{job="{{ include "space-invaders.fullname" . }}"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Space Invaders instance is down"
+        description: "Space Invaders instance {{ $labels.instance }} has been down for more than 1 minute."
+    
+    - alert: SpaceInvadersHighCPU
+      expr: rate(container_cpu_usage_seconds_total{pod=~"{{ include "space-invaders.fullname" . }}-.*"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Space Invaders high CPU usage"
+        description: "Space Invaders instance {{ $labels.pod }} CPU usage is above 80% for more than 5 minutes."
+    
+    - alert: SpaceInvadersHighMemory
+      expr: container_memory_usage_bytes{pod=~"{{ include "space-invaders.fullname" . }}-.*"} / container_spec_memory_limit_bytes > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Space Invaders high memory usage"
+        description: "Space Invaders instance {{ $labels.pod }} memory usage is above 80% for more than 5 minutes."
+{{- end }}

@@ -1,0 +1,498 @@
+# Advanced Enterprise Pipeline
+# Bitbucket Pipelines template for comprehensive testing and deployment
+
+image: atlassian/default-image:4
+
+definitions:
+  caches:
+    flutter: .flutter/
+    pub-cache: .pub-cache/
+    node: node_modules/
+  
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: test_db
+        POSTGRES_USER: test_user
+        POSTGRES_PASSWORD: test_password
+      ports:
+        - 5432:5432
+    
+    redis:
+      image: redis:7
+      ports:
+        - 6379:6379
+
+  steps:
+    - step: &setup-flutter
+        name: Setup Flutter Environment
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+          - pub-cache
+        script:
+          - echo "🔧 Setting up Flutter environment..."
+          - flutter doctor -v
+          - flutter pub get
+          - flutter --version
+        artifacts:
+          - .flutter/**
+          - .pub-cache/**
+
+    - step: &code-quality
+        name: Code Quality Analysis
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+          - pub-cache
+        script:
+          - echo "🔍 Running code quality analysis..."
+          - flutter analyze --no-fatal-infos
+          - flutter format --set-exit-if-changed .
+          - dart pub deps --style=tree
+        artifacts:
+          - analysis_options.yaml
+
+    - step: &unit-tests
+        name: Unit Tests with Coverage
+        image: cirrusci/flutter:3.16.0
+        caches:
+          - flutter
+          - pub-cache
+        script:
+          - echo "🧪 Running unit tests..."
+          - flutter test --coverage --reporter=json > test-results.json || true
+          - flutter test --coverage --reporter=expanded > test-results.txt || true
+          - genhtml coverage/lcov.info -o coverage/html || true
+          - lcov --summary coverage/lcov.info || true
+        artifacts:
+          - test-results.*
+          - coverage/**
+        reports:
+          junit: test-results.xml
+          coverage:
+            - coverage:
+                format: cobertura
+                path: coverage/cobertura-coverage.xml
+
+    - step: &integration-tests
+        name: Integration Tests
+        image: cirrusci/flutter:3.16.0
+        services:
+          - postgres
+          - redis
+        caches:
+          - flutter
+          - pub-cache
+        script:
+          - echo "🧪 Running integration tests..."
+          - export DATABASE_URL="postgresql://test_user:test_password@localhost:5432/test_db"
+          - export REDIS_URL="redis://localhost:6379"
+          - docker-compose -f docker-compose.test.yml up -d
+          - sleep 10
+          - flutter test integration_test/ --reporter=json > integration-test-results.json || true
+          - flutter test integration_test/ --reporter=expanded > integration-test-results.txt || true
+          - docker-compose -f docker-compose.test.yml down
+        artifacts:
+          - integration-test-results.*
+          - test/**
+
+    - step: &security-scan
+        name: Security Scanning
+        image: python:3.11
+        script:
+          - echo "🔍 Running security scanning..."
+          - pip install bandit safety semgrep trivy
+          - bandit -r lib/ -f json -o bandit-report.json || true
+          - bandit -r lib/ -f txt -o bandit-report.txt || true
+          - safety check --json --output safety-report.json || true
+          - safety check --output safety-report.txt || true
+          - semgrep --config=auto --json --output=semgrep-report.json lib/ || true
+          - semgrep --config=auto --output=semgrep-report.txt lib/ || true
+          - trivy fs --format json --output trivy-report.json . || true
+          - trivy fs --format table . || true
+        artifacts:
+          - bandit-report.*
+          - safety-report.*
+          - semgrep-report.*
+          - trivy-report.*
+
+    - step: &container-security
+        name: Container Security Scanning
+        image: docker:24.0.5
+        services:
+          - docker:24.0.5-dind
+        script:
+          - echo "🔍 Running container security scanning..."
+          - docker build -t $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT .
+          - trivy image --format json --output container-trivy-report.json $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT || true
+          - trivy image --format table $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT || true
+          - grype $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT -o json -o container-grype-report.json || true
+          - grype $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT || true
+        artifacts:
+          - container-trivy-report.*
+          - container-grype-report.*
+
+    - step: &performance-test
+        name: Performance Testing
+        image: cirrusci/flutter:3.16.0
+        script:
+          - echo "🚀 Running performance testing..."
+          - flutter build web --release --web-renderer canvaskit
+          - npm install -g lighthouse-cli
+          - python3 -m http.server 8080 --directory build/web &
+          - SERVER_PID=$!
+          - sleep 5
+          - lighthouse http://localhost:8080 --output=json --output-path=lighthouse-report.json --chrome-flags="--headless" --quiet || true
+          - lighthouse http://localhost:8080 --output=html --output-path=lighthouse-report.html --chrome-flags="--headless" --quiet || true
+          - kill $SERVER_PID
+          - flutter test test/performance/ --reporter=json > performance-test-results.json || true
+        artifacts:
+          - lighthouse-report.*
+          - performance-test-results.*
+
+    - step: &accessibility-test
+        name: Accessibility Testing
+        image: cirrusci/flutter:3.16.0
+        script:
+          - echo "♿ Running accessibility testing..."
+          - flutter build web --release
+          - npm install -g axe-cli pa11y-ci
+          - python3 -m http.server 8080 --directory build/web &
+          - SERVER_PID=$!
+          - sleep 5
+          - axe http://localhost:8080 --tags wcag2a,wcag2aa,wcag21aa --format json > axe-report.json || true
+          - axe http://localhost:8080 --tags wcag2a,wcag2aa,wcag21aa --format html > axe-report.html || true
+          - pa11y-ci http://localhost:8080 --reporter json > pa11y-report.json || true
+          - pa11y-ci http://localhost:8080 --reporter html > pa11y-report.html || true
+          - kill $SERVER_PID
+          - flutter test test/accessibility/ --reporter=json > accessibility-test-results.json || true
+        artifacts:
+          - axe-report.*
+          - pa11y-report.*
+          - accessibility-test-results.*
+
+    - step: &build-artifacts
+        name: Build Release Artifacts
+        image: cirrusci/flutter:3.16.0
+        script:
+          - echo "🏗️ Building release artifacts..."
+          - flutter pub get
+          - flutter build apk --release
+          - flutter build web --release
+          - flutter build linux --release
+          - flutter build windows --release
+          - flutter build macos --release
+        artifacts:
+          - build/**/*.apk
+          - build/**/*.exe
+          - build/**/*.app
+          - build/web/**
+
+    - step: &deploy-staging
+        name: Deploy to Staging
+        image: alpine:latest
+        deployment: staging
+        trigger: manual
+        script:
+          - echo "🚀 Deploying to staging..."
+          - apk add --no-cache curl openssh-client
+          - echo "$STAGING_SSH_KEY" > ~/.ssh/id_rsa
+          - chmod 600 ~/.ssh/id_rsa
+          - ssh -o StrictHostKeyChecking=no $STAGING_USER@$STAGING_HOST "
+              cd /var/www/space-invaders-staging &&
+              docker pull $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT &&
+              docker stop space-invaders-staging || true &&
+              docker rm space-invaders-staging || true &&
+              docker run -d --name space-invaders-staging -p 8080:80 $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT
+            "
+
+    - step: &deploy-production
+        name: Deploy to Production
+        image: alpine:latest
+        deployment: production
+        trigger: manual
+        script:
+          - echo "🚀 Deploying to production..."
+          - apk add --no-cache curl openssh-client
+          - echo "$PRODUCTION_SSH_KEY" > ~/.ssh/id_rsa
+          - chmod 600 ~/.ssh/id_rsa
+          - ssh -o StrictHostKeyChecking=no $PRODUCTION_USER@$PRODUCTION_HOST "
+              cd /var/www/space-invaders-production &&
+              docker pull $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT &&
+              docker stop space-invaders-production || true &&
+              docker rm space-invaders-production || true &&
+              docker run -d --name space-invaders-production -p 80:80 $BITBUCKET_REPO_SLUG:$BITBUCKET_COMMIT
+            "
+
+    - step: &quality-report
+        name: Generate Quality Report
+        image: python:3.11
+        script:
+          - echo "📊 Generating comprehensive quality report..."
+          - python3 << 'EOF'
+            import json
+            import os
+            from datetime import datetime
+            import glob
+            
+            def generate_quality_report():
+                report = {
+                    "report_date": datetime.now().isoformat(),
+                    "project": "$BITBUCKET_REPO_SLUG",
+                    "commit": "$BITBUCKET_COMMIT",
+                    "branch": "$BITBUCKET_BRANCH",
+                    "pipeline_id": "$BITBUCKET_PIPELINE_UUID",
+                    "results": {}
+                }
+                
+                # Collect unit test results
+                if os.path.exists('test-results.json'):
+                    with open('test-results.json', 'r') as f:
+                        test_data = json.load(f)
+                        unit_results = {
+                            "total_tests": len(test_data.get('tests', [])),
+                            "passed_tests": len([t for t in test_data.get('tests', []) if t.get('result') == 'success']),
+                            "failed_tests": len([t for t in test_data.get('tests', []) if t.get('result') == 'error'])
+                        }
+                        if unit_results["total_tests"] > 0:
+                            unit_results["success_rate"] = round((unit_results["passed_tests"] / unit_results["total_tests"]) * 100, 2)
+                        report["results"]["unit_tests"] = unit_results
+                
+                # Collect coverage information
+                if os.path.exists('coverage/lcov.info'):
+                    with open('coverage/lcov.info', 'r') as f:
+                        coverage_content = f.read()
+                        lines_found = coverage_content.count('LF:')
+                        lines_hit = coverage_content.count('LH:')
+                        if lines_found > 0:
+                            report["results"]["coverage"] = {
+                                "lines_found": lines_found,
+                                "lines_hit": lines_hit,
+                                "coverage_percentage": round((lines_hit / lines_found) * 100, 2)
+                            }
+                
+                # Collect performance results
+                if os.path.exists('lighthouse-report.json'):
+                    with open('lighthouse-report.json', 'r') as f:
+                        lighthouse_data = json.load(f)
+                        performance_score = lighthouse_data.get('categories', {}).get('performance', {}).get('score', 0) * 100
+                        report["results"]["performance"] = {
+                            "performance_score": performance_score,
+                            "fcp": lighthouse_data.get('audits', {}).get('first-contentful-paint', {}).get('numericValue'),
+                            "lcp": lighthouse_data.get('audits', {}).get('largest-contentful-paint', {}).get('numericValue'),
+                            "tti": lighthouse_data.get('audits', {}).get('interactive', {}).get('numericValue')
+                        }
+                
+                # Collect accessibility results
+                accessibility_violations = 0
+                if os.path.exists('axe-report.json'):
+                    with open('axe-report.json', 'r') as f:
+                        axe_data = json.load(f)
+                        accessibility_violations += len(axe_data.get('violations', []))
+                
+                if os.path.exists('pa11y-report.json'):
+                    with open('pa11y-report.json', 'r') as f:
+                        pa11y_data = json.load(f)
+                        accessibility_violations += len(pa11y_data)
+                
+                report["results"]["accessibility"] = {
+                    "total_violations": accessibility_violations,
+                    "compliance_score": max(0, 100 - (accessibility_violations * 5))
+                }
+                
+                # Collect security results
+                security_issues = 0
+                if os.path.exists('bandit-report.json'):
+                    with open('bandit-report.json', 'r') as f:
+                        bandit_data = json.load(f)
+                        security_issues += len(bandit_data.get('results', []))
+                
+                if os.path.exists('safety-report.json'):
+                    with open('safety-report.json', 'r') as f:
+                        safety_data = json.load(f)
+                        security_issues += len(safety_data.get('vulnerabilities', []))
+                
+                report["results"]["security"] = {
+                    "total_issues": security_issues,
+                    "security_score": max(0, 100 - (security_issues * 10))
+                }
+                
+                # Calculate overall quality score
+                scores = []
+                if "unit_tests" in report["results"] and report["results"]["unit_tests"].get("success_rate"):
+                    scores.append(report["results"]["unit_tests"]["success_rate"])
+                
+                if "coverage" in report["results"]:
+                    scores.append(report["results"]["coverage"]["coverage_percentage"])
+                
+                if "performance" in report["results"]:
+                    scores.append(report["results"]["performance"]["performance_score"])
+                
+                if "accessibility" in report["results"]:
+                    scores.append(report["results"]["accessibility"]["compliance_score"])
+                
+                if "security" in report["results"]:
+                    scores.append(report["results"]["security"]["security_score"])
+                
+                if scores:
+                    report["overall_quality_score"] = round(sum(scores) / len(scores), 2)
+                else:
+                    report["overall_quality_score"] = 0
+                
+                # Save report
+                with open('comprehensive-quality-report.json', 'w') as f:
+                    json.dump(report, f, indent=2)
+                
+                # Generate HTML report
+                html_report = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Quality Report - $BITBUCKET_REPO_SLUG</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        .header {{ background: #f0f0f0; padding: 20px; border-radius: 5px; }}
+                        .section {{ margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
+                        .score {{ font-size: 24px; font-weight: bold; color: {"green" if report.get("overall_quality_score", 0) >= 80 else "orange" if report.get("overall_quality_score", 0) >= 60 else "red"}; }}
+                        .metric {{ margin: 10px 0; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>Quality Report</h1>
+                        <p><strong>Project:</strong> $BITBUCKET_REPO_SLUG</p>
+                        <p><strong>Commit:</strong> $BITBUCKET_COMMIT</p>
+                        <p><strong>Branch:</strong> $BITBUCKET_BRANCH</p>
+                        <p><strong>Pipeline:</strong> $BITBUCKET_PIPELINE_UUID</p>
+                        <p><strong>Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Overall Quality Score</h2>
+                        <div class="score">{report.get('overall_quality_score', 'N/A')}%</div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Unit Tests</h2>
+                        <div class="metric">Total Tests: {report["results"].get("unit_tests", {}).get("total_tests", "N/A")}</div>
+                        <div class="metric">Passed: {report["results"].get("unit_tests", {}).get("passed_tests", "N/A")}</div>
+                        <div class="metric">Failed: {report["results"].get("unit_tests", {}).get("failed_tests", "N/A")}</div>
+                        <div class="metric">Success Rate: {report["results"].get("unit_tests", {}).get("success_rate", "N/A")}%</div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Coverage</h2>
+                        <div class="metric">Lines Found: {report["results"].get("coverage", {}).get("lines_found", "N/A")}</div>
+                        <div class="metric">Lines Hit: {report["results"].get("coverage", {}).get("lines_hit", "N/A")}</div>
+                        <div class="metric">Coverage: {report["results"].get("coverage", {}).get("coverage_percentage", "N/A")}%</div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Performance</h2>
+                        <div class="metric">Performance Score: {report["results"].get("performance", {}).get("performance_score", "N/A")}</div>
+                        <div class="metric">First Contentful Paint: {report["results"].get("performance", {}).get("fcp", "N/A")}ms</div>
+                        <div class="metric">Largest Contentful Paint: {report["results"].get("performance", {}).get("lcp", "N/A")}ms</div>
+                        <div class="metric">Time to Interactive: {report["results"].get("performance", {}).get("tti", "N/A")}ms</div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Accessibility</h2>
+                        <div class="metric">Total Violations: {report["results"].get("accessibility", {}).get("total_violations", "N/A")}</div>
+                        <div class="metric">Compliance Score: {report["results"].get("accessibility", {}).get("compliance_score", "N/A")}%</div>
+                    </div>
+                    
+                    <div class="section">
+                        <h2>Security</h2>
+                        <div class="metric">Total Issues: {report["results"].get("security", {}).get("total_issues", "N/A")}</div>
+                        <div class="metric">Security Score: {report["results"].get("security", {}).get("security_score", "N/A")}%</div>
+                    </div>
+                </body>
+                </html>
+                """
+                
+                with open('quality-report.html', 'w') as f:
+                    f.write(html_report)
+                
+                print("✅ Comprehensive quality report generated!")
+                print(f"Overall Quality Score: {report.get('overall_quality_score', 'N/A')}%")
+                return report
+            
+            generate_quality_report()
+            EOF
+        artifacts:
+          - comprehensive-quality-report.json
+          - quality-report.html
+
+pipelines:
+  branches:
+    main:
+      - step: *setup-flutter
+      - step: *code-quality
+      - step: *unit-tests
+      - step: *integration-tests
+      - step: *security-scan
+      - step: *container-security
+      - step: *performance-test
+      - step: *accessibility-test
+      - step: *build-artifacts
+      - step: *deploy-staging
+      - step: *quality-report
+    
+    develop:
+      - step: *setup-flutter
+      - step: *code-quality
+      - step: *unit-tests
+      - step: *integration-tests
+      - step: *security-scan
+      - step: *quality-report
+    
+    staging:
+      - step: *setup-flutter
+      - step: *unit-tests
+      - step: *build-artifacts
+      - step: *deploy-staging
+
+  pull-requests:
+    '**':
+      - step: *setup-flutter
+      - step: *code-quality
+      - step: *unit-tests
+      - step: *integration-tests
+      - step: *security-scan
+      - step: *quality-report
+
+  tags:
+    'v*':
+      - step: *setup-flutter
+      - step: *code-quality
+      - step: *unit-tests
+      - step: *integration-tests
+      - step: *security-scan
+      - step: *container-security
+      - step: *performance-test
+      - step: *accessibility-test
+      - step: *build-artifacts
+      - step: *deploy-production
+      - step: *quality-report
+
+  custom:
+    security-scan:
+      - step: *security-scan
+      - step: *container-security
+    
+    performance-test:
+      - step: *performance-test
+    
+    accessibility-test:
+      - step: *accessibility-test
+    
+    deploy-staging:
+      - step: *build-artifacts
+      - step: *deploy-staging
+    
+    deploy-production:
+      - step: *build-artifacts
+      - step: *deploy-production
+      - step: *quality-report

@@ -1,0 +1,575 @@
+name: Cloud Native DevOps Automation
+
+on:
+  push:
+    branches: [ main, develop, cloud-native ]
+    paths:
+      - 'cloud-native/**'
+      - 'kubernetes/**'
+      - 'helm/**'
+      - 'docker/**'
+      - '.github/workflows/cloud-native-devops.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'cloud-native/**'
+      - 'kubernetes/**'
+      - 'helm/**'
+      - 'docker/**'
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - build
+          - deploy
+          - test
+          - monitor
+          - cleanup
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      cluster:
+        description: 'Target cluster'
+        required: false
+        default: 'primary'
+        type: string
+
+env:
+  CLUSTER_NAME: ${{ github.event.inputs.cluster || 'primary' }}
+  NAMESPACE: cloud-native
+  DOCKER_REGISTRY: ghcr.io
+  DOCKER_IMAGE: ghcr.io/${{ github.repository }}/cloud-native-app
+  KUBECTL_VERSION: '1.28.4'
+  HELM_VERSION: '3.13.3'
+  KUSTOMIZE_VERSION: '5.0.3'
+
+jobs:
+  setup:
+    name: Setup Cloud Native Environment
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+      cluster-ready: ${{ steps.cluster.outputs.ready }}
+      namespace-created: ${{ steps.namespace.outputs.created }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./cloud-native
+          file: ./cloud-native/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Setup Kubernetes tools
+        uses: azure/setup-kubectl@v3
+        with:
+          version: ${{ env.KUBECTL_VERSION }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Setup Kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Verify cluster connectivity
+        id: cluster
+        run: |
+          if kubectl cluster-info --request-timeout=10s; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "✅ Cluster connectivity verified"
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "❌ Cluster connectivity failed"
+            exit 1
+          fi
+
+      - name: Create namespace
+        id: namespace
+        run: |
+          if kubectl get namespace ${{ env.NAMESPACE }} >/dev/null 2>&1; then
+            echo "created=false" >> $GITHUB_OUTPUT
+            echo "✅ Namespace ${{ env.NAMESPACE }} already exists"
+          else
+            kubectl create namespace ${{ env.NAMESPACE }}
+            echo "created=true" >> $GITHUB_OUTPUT
+            echo "✅ Created namespace ${{ env.NAMESPACE }}"
+          fi
+
+  security-scan:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: setup
+    if: needs.setup.outputs.cluster-ready == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ needs.setup.outputs.image-tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Run container image security scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/tmp/.cache/ \
+            aquasec/trivy:latest image --format json --output /tmp/.cache/trivy-image-report.json \
+            ${{ needs.setup.outputs.image-tag }}
+
+      - name: Run Kubernetes security scan
+        run: |
+          kubectl auth can-i --list --namespace ${{ env.NAMESPACE }}
+          kubectl get pods --namespace ${{ env.NAMESPACE }} -o json | \
+            jq '.items[] | select(.spec.securityContext == null) | .metadata.name'
+
+      - name: Generate security report
+        run: |
+          cat > security-report.md << EOF
+          # Cloud Native Security Report
+          
+          ## Image Security Scan
+          \`\`\`json
+          $(cat /tmp/.cache/trivy-image-report.json | jq '.Results[] | select(.Vulnerabilities != null) | {Target: .Target, Vulnerabilities: .Vulnerabilities | length}')
+          \`\`\`
+          
+          ## Kubernetes Security Assessment
+          \`\`\`
+          $(kubectl get pods --namespace ${{ env.NAMESPACE }} -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.securityContext != null}{"\n"}{end}')
+          \`\`\`
+          
+          Generated on: $(date)
+          EOF
+
+      - name: Upload security artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            trivy-results.sarif
+            trivy-image-report.json
+            security-report.md
+          retention-days: 30
+
+  deploy-helm:
+    name: Deploy with Helm
+    runs-on: ubuntu-latest
+    needs: [setup, security-scan]
+    if: needs.setup.outputs.cluster-ready == 'true'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    strategy:
+      matrix:
+        component: [frontend, backend, database, monitoring]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Add Helm repositories
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+
+      - name: Deploy ${{ matrix.component }} with Helm
+        run: |
+          cd helm/${{ matrix.component }}
+          
+          # Create values file for environment
+          cat > values-${{ github.event.inputs.environment || 'staging' }}.yaml << EOF
+          image:
+            repository: ${{ env.DOCKER_IMAGE }}
+            tag: ${{ needs.setup.outputs.image-tag }}
+            pullPolicy: Always
+          
+          replicaCount: ${{ github.event.inputs.environment == 'production' && '3' || '1' }}
+          
+          resources:
+            limits:
+              cpu: ${{ github.event.inputs.environment == 'production' && '1000m' || '500m' }}
+              memory: ${{ github.event.inputs.environment == 'production' && '1Gi' || '512Mi' }}
+            requests:
+              cpu: ${{ github.event.inputs.environment == 'production' && '500m' || '250m' }}
+              memory: ${{ github.event.inputs.environment == 'production' && '512Mi' || '256Mi' }}
+          
+          autoscaling:
+            enabled: ${{ github.event.inputs.environment == 'production' && 'true' || 'false' }}
+            minReplicas: 2
+            maxReplicas: 10
+            targetCPUUtilizationPercentage: 70
+          
+          monitoring:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+              interval: 30s
+          
+          ingress:
+            enabled: true
+            className: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+              nginx.ingress.kubernetes.io/rate-limit: "100"
+            hosts:
+              - host: ${{ matrix.component }}-${{ github.event.inputs.environment || 'staging' }}.space-invaders.local
+                paths:
+                  - path: /
+                    pathType: Prefix
+            tls:
+              - secretName: ${{ matrix.component }}-tls
+                hosts:
+                  - ${{ matrix.component }}-${{ github.event.inputs.environment || 'staging' }}.space-invaders.local
+          EOF
+          
+          # Deploy with Helm
+          helm upgrade --install ${{ matrix.component }} . \
+            --namespace ${{ env.NAMESPACE }} \
+            --values values-${{ github.event.inputs.environment || 'staging' }}.yaml \
+            --wait \
+            --timeout 10m \
+            --atomic
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods --namespace ${{ env.NAMESPACE }} -l app.kubernetes.io/name=${{ matrix.component }}
+          kubectl get services --namespace ${{ env.NAMESPACE }} -l app.kubernetes.io/name=${{ matrix.component }}
+          kubectl get ingress --namespace ${{ env.NAMESPACE }} -l app.kubernetes.io/name=${{ matrix.component }}
+
+      - name: Run health checks
+        run: |
+          sleep 30  # Wait for pods to be ready
+          
+          # Check pod readiness
+          kubectl wait --for=condition=ready pod \
+            --selector=app.kubernetes.io/name=${{ matrix.component }} \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+          
+          # Check service endpoints
+          kubectl get endpoints --namespace ${{ env.NAMESPACE }} -l app.kubernetes.io/name=${{ matrix.component }}
+          
+          # Test connectivity if ingress is enabled
+          if kubectl get ingress ${{ matrix.component }} --namespace ${{ env.NAMESPACE }} >/dev/null 2>&1; then
+            INGRESS_HOST=$(kubectl get ingress ${{ matrix.component }} --namespace ${{ env.NAMESPACE }} -o jsonpath='{.spec.rules[0].host}')
+            echo "Testing ingress endpoint: https://$INGRESS_HOST"
+            curl -f -s -o /dev/null -w "%{http_code}" https://$INGRESS_HOST/health || echo "Health check failed"
+          fi
+
+  deploy-kustomize:
+    name: Deploy with Kustomize
+    runs-on: ubuntu-latest
+    needs: [setup, security-scan]
+    if: needs.setup.outputs.cluster-ready == 'true'
+    environment: ${{ github.event.inputs.environment || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy with Kustomize
+        run: |
+          cd kustomize/overlays/${{ github.event.inputs.environment || 'staging' }}
+          
+          # Build and apply manifests
+          kustomize build . | kubectl apply -f - --namespace ${{ env.NAMESPACE }}
+          
+          # Wait for rollout
+          kubectl rollout status deployment/cloud-native-app \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+
+      - name: Verify Kustomize deployment
+        run: |
+          kubectl get all --namespace ${{ env.NAMESPACE }} -l app=cloud-native-app
+          kubectl describe deployment cloud-native-app --namespace ${{ env.NAMESPACE }}
+
+  monitoring-setup:
+    name: Setup Monitoring
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-helm, deploy-kustomize]
+    if: needs.setup.outputs.cluster-ready == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy Prometheus and Grafana
+        run: |
+          # Deploy Prometheus
+          kubectl apply -f monitoring/prometheus/ --namespace ${{ env.NAMESPACE }}
+          
+          # Deploy Grafana
+          kubectl apply -f monitoring/grafana/ --namespace ${{ env.NAMESPACE }}
+          
+          # Deploy ServiceMonitor for application
+          kubectl apply -f monitoring/servicemonitor.yaml --namespace ${{ env.NAMESPACE }}
+
+      - name: Deploy Jaeger for tracing
+        run: |
+          kubectl apply -f monitoring/jaeger/ --namespace ${{ env.NAMESPACE }}
+
+      - name: Deploy Loki for logging
+        run: |
+          kubectl apply -f monitoring/loki/ --namespace ${{ env.NAMESPACE }}
+
+      - name: Verify monitoring stack
+        run: |
+          # Check Prometheus
+          kubectl wait --for=condition=ready pod \
+            --selector=app=prometheus \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+          
+          # Check Grafana
+          kubectl wait --for=condition=ready pod \
+            --selector=app=grafana \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+          
+          # Check Jaeger
+          kubectl wait --for=condition=ready pod \
+            --selector=app=jaeger \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+
+      - name: Setup dashboards
+        run: |
+          # Create ConfigMaps for Grafana dashboards
+          kubectl apply -f monitoring/grafana/dashboards/ --namespace ${{ env.NAMESPACE }}
+
+  performance-testing:
+    name: Performance Testing
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-helm, deploy-kustomize, monitoring-setup]
+    if: needs.setup.outputs.cluster-ready == 'true'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        run: |
+          sudo gpg -k
+          sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update
+          sudo apt-get install k6
+
+      - name: Run load tests
+        run: |
+          cd performance-testing
+          
+          # Get application endpoint
+          INGRESS_HOST=$(kubectl get ingress cloud-native-app --namespace ${{ env.NAMESPACE }} -o jsonpath='{.spec.rules[0].host}' || echo "localhost")
+          TARGET_URL="https://$INGRESS_HOST"
+          
+          echo "Running load tests against $TARGET_URL"
+          
+          # Run load test
+          k6 run --out json=load-test-results.json load-test.js \
+            --vus 50 \
+            --duration 2m \
+            --env TARGET_URL=$TARGET_URL
+          
+          # Run stress test
+          k6 run --out json=stress-test-results.json stress-test.js \
+            --vus 100 \
+            --duration 5m \
+            --env TARGET_URL=$TARGET_URL
+
+      - name: Generate performance report
+        run: |
+          cd performance-testing
+          
+          python3 generate-report.py \
+            --load-results load-test-results.json \
+            --stress-results stress-test-results.json \
+            --output performance-report.md
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: |
+            performance-testing/load-test-results.json
+            performance-testing/stress-test-results.json
+            performance-testing/performance-report.md
+          retention-days: 30
+
+  cleanup:
+    name: Cleanup Resources
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-helm, deploy-kustomize, monitoring-setup, performance-testing]
+    if: always() && needs.setup.outputs.cluster-ready == 'true' && github.event.inputs.action == 'cleanup'
+    steps:
+      - name: Cleanup test resources
+        run: |
+          # Remove test deployments
+          kubectl delete deployment cloud-native-app-test --namespace ${{ env.NAMESPACE }} --ignore-not-found=true
+          
+          # Remove test services
+          kubectl delete service cloud-native-app-test --namespace ${{ env.NAMESPACE }} --ignore-not-found=true
+          
+          # Clean up old images
+          docker image prune -f
+          
+          echo "✅ Cleanup completed"
+
+  notify:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [setup, security-scan, deploy-helm, deploy-kustomize, monitoring-setup, performance-testing]
+    if: always()
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts/
+
+      - name: Generate summary report
+        run: |
+          cat > deployment-summary.md << EOF
+          # Cloud Native DevOps Deployment Summary
+          
+          ## Deployment Information
+          - **Repository**: ${{ github.repository }}
+          - **Branch**: ${{ github.ref_name }}
+          - **Commit**: ${{ github.sha }}
+          - **Environment**: ${{ github.event.inputs.environment || 'staging' }}
+          - **Cluster**: ${{ env.CLUSTER_NAME }}
+          - **Namespace**: ${{ env.NAMESPACE }}
+          
+          ## Results
+          - **Setup**: ${{ needs.setup.result }}
+          - **Security Scan**: ${{ needs.security-scan.result }}
+          - **Helm Deployment**: ${{ needs.deploy-helm.result }}
+          - **Kustomize Deployment**: ${{ needs.deploy-kustomize.result }}
+          - **Monitoring Setup**: ${{ needs.monitoring-setup.result }}
+          - **Performance Testing**: ${{ needs.performance-testing.result }}
+          
+          ## Image Information
+          - **Image Tag**: ${{ needs.setup.outputs.image-tag }}
+          - **Image Digest**: ${{ needs.setup.outputs.image-digest }}
+          
+          Generated on: $(date)
+          EOF
+
+      - name: Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#cloud-native-devops'
+          text: |
+            Cloud Native DevOps deployment completed!
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Environment: ${{ github.event.inputs.environment || 'staging' }}
+            Result: ${{ job.status }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Cloud Native DevOps Deployment - ${{ job.status }}"
+          to: ${{ secrets.NOTIFICATION_EMAIL }}
+          from: "GitHub Actions <noreply@space-invaders.local>"
+          body: file://deployment-summary.md
+          attachments: |
+            artifacts/security-reports/security-report.md
+            artifacts/performance-results/performance-report.md
+
+      - name: Update GitHub release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/security-reports/*.sarif
+            artifacts/performance-results/*.json
+            deployment-summary.md
+          draft: false
+          prerelease: false
+          name: "Cloud Native Release ${{ github.sha }}"
+          body: |
+            ## Cloud Native DevOps Release
+            
+            This release includes:
+            - Docker image: ${{ needs.setup.outputs.image-tag }}
+            - Security scan results
+            - Performance test results
+            - Deployment manifests
+            
+            ### Deployment Status
+            - Environment: ${{ github.event.inputs.environment || 'staging' }}
+            - Cluster: ${{ env.CLUSTER_NAME }}
+            - Namespace: ${{ env.NAMESPACE }}
+            
+            ### Artifacts
+            - Security reports attached
+            - Performance reports attached
+            - Deployment summary attached
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
