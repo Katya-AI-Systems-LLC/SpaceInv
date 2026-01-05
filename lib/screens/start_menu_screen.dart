@@ -8,6 +8,7 @@
  import 'statistics_screen.dart';
  import 'achievements_screen.dart';
  import 'leaderboard_screen.dart';
+ import '../utils/responsive_helper.dart';
 
 class StartMenuScreen extends StatelessWidget {
   const StartMenuScreen({super.key});
@@ -15,6 +16,9 @@ class StartMenuScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final loc = LocalizationService();
+    final responsive = ResponsiveHelper();
+    responsive.initialize(context);
+    
     return Scaffold(
       backgroundColor: Colors.black,
       body: Container(
@@ -35,7 +39,7 @@ class StartMenuScreen extends StatelessWidget {
                 loc.t('title_space_invaders'),
                 style: TextStyle(
                   color: Colors.greenAccent,
-                  fontSize: 48,
+                  fontSize: responsive.titleFontSize,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 4,
                   shadows: [
@@ -46,7 +50,7 @@ class StartMenuScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              SizedBox(height: 60),
+              responsive.scaledSizedBox(height: 60),
               
               // Start button
               ElevatedButton(
@@ -82,21 +86,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 20),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_start_game'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 24,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
 
               // Hangar button
               ElevatedButton(
@@ -108,21 +112,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orangeAccent,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_hangar'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
               
               // Campaign button
               ElevatedButton(
@@ -134,21 +138,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_campaign'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
               
               // Statistics button
               ElevatedButton(
@@ -160,21 +164,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.indigo,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_statistics'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
               
               // Leaderboard button
               ElevatedButton(
@@ -186,21 +190,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueGrey,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_leaderboard'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
               
               // Achievements button
               ElevatedButton(
@@ -212,21 +216,21 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.deepPurple,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_achievements'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 15),
+              responsive.scaledSizedBox(height: 15),
               
               // Settings button
               ElevatedButton(
@@ -238,25 +242,25 @@ class StartMenuScreen extends StatelessWidget {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.grey.shade800,
-                  padding: EdgeInsets.symmetric(horizontal: 60, vertical: 15),
+                  padding: responsive.buttonPadding,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                    borderRadius: BorderRadius.circular(responsive.buttonBorderRadius),
                   ),
                 ),
                 child: Text(
                   loc.t('btn_settings'),
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
+                    fontSize: responsive.buttonFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
-              SizedBox(height: 30),
+              responsive.scaledSizedBox(height: 30),
               
               // Instructions
               Container(
-                padding: EdgeInsets.all(20),
+                padding: responsive.screenPadding,
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(10),
@@ -268,25 +272,25 @@ class StartMenuScreen extends StatelessWidget {
                       loc.t('menu_controls'),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 20,
+                        fontSize: responsive.uiFontSize,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    SizedBox(height: 15),
-                    _buildInstruction('← →', loc.t('ctrl_move')),
-                    _buildInstruction('SPACE / TAP', loc.t('ctrl_shoot')),
-                    _buildInstruction('P / ESC', loc.t('ctrl_pause')),
+                    responsive.scaledSizedBox(height: 15),
+                    _buildInstruction('← →', loc.t('ctrl_move'), responsive),
+                    _buildInstruction('SPACE / TAP', loc.t('ctrl_shoot'), responsive),
+                    _buildInstruction('P / ESC', loc.t('ctrl_pause'), responsive),
                   ],
                 ),
               ),
-              SizedBox(height: 30),
+              responsive.scaledSizedBox(height: 30),
               
               // Credits
               Text(
                 loc.t('menu_tagline'),
                 style: TextStyle(
                   color: Colors.white54,
-                  fontSize: 16,
+                  fontSize: responsive.buttonFontSize,
                   fontStyle: FontStyle.italic,
                 ),
               ),
@@ -347,14 +351,14 @@ class StartMenuScreen extends StatelessWidget {
     }
   }
   
-  Widget _buildInstruction(String key, String action) {
+  Widget _buildInstruction(String key, String action, ResponsiveHelper responsive) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: 5),
+      padding: responsive.scaledEdgeInsets(vertical: 5),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: responsive.scaledEdgeInsets(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: Colors.white12,
               borderRadius: BorderRadius.circular(5),
@@ -363,17 +367,17 @@ class StartMenuScreen extends StatelessWidget {
               key,
               style: TextStyle(
                 color: Colors.greenAccent,
-                fontSize: 14,
+                fontSize: responsive.smallFontSize,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
-          SizedBox(width: 15),
+          responsive.scaledSizedBox(width: 15),
           Text(
             action,
             style: TextStyle(
               color: Colors.white70,
-              fontSize: 16,
+              fontSize: responsive.buttonFontSize,
             ),
           ),
         ],

@@ -6,6 +6,7 @@ import 'services/leaderboard_service.dart';
 import 'services/rest_online_leaderboard_client.dart';
 import 'services/upgrades_service.dart';
 import 'screens/start_menu_screen.dart';
+import 'utils/responsive_helper.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,7 +34,13 @@ class SpaceInvadersApp extends StatelessWidget {
       title: 'Space Invaders',
       theme: ThemeData.dark(),
       debugShowCheckedModeBanner: false,
-      home: const StartMenuScreen(),
+      home: Builder(
+        builder: (context) {
+          // Initialize responsive helper at app level
+          ResponsiveHelper().initialize(context);
+          return const StartMenuScreen();
+        },
+      ),
     );
   }
 }

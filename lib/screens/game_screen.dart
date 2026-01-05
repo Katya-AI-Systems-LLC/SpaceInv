@@ -25,6 +25,7 @@ import '../services/audio_service.dart';
 import '../services/upgrades_service.dart';
 import '../services/localization_service.dart';
 import '../screens/game_over_screen.dart';
+import '../utils/responsive_helper.dart';
 
 class GameScreen extends StatefulWidget {
   final GameMode mode;
@@ -52,6 +53,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
   String? _powerUpBannerLabel;
   double _comboBannerTime = 0;
   int _lastComboMultiplier = 1;
+  late ResponsiveHelper _responsive;
 
   static const double _basePlayerSpeed = 5;
   static const double _boostedPlayerSpeed = 8;
@@ -69,6 +71,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     _focusNode.requestFocus();
     _audioService.playBackgroundMusic();
     _startGameLoop();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _responsive = ResponsiveHelper();
+    _responsive.initialize(context);
   }
 
   void _startGameLoop() {
@@ -876,7 +885,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               
               // Player
               Positioned(
-                bottom: 20,
+                bottom: _responsive.gameUIBottomOffset,
                 left: gameState.player.x,
                 child: Transform.translate(
                   offset: Offset(0, math.sin(time * 5) * 2),
@@ -886,9 +895,9 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
               
               // UI Overlay
               Positioned(
-                top: 40,
-                left: 16,
-                right: 16,
+                top: _responsive.gameUITopOffset,
+                left: _responsive.screenPadding.left,
+                right: _responsive.screenPadding.right,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -900,66 +909,66 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                           children: [
                             Text(
                               'Score: ${gameState.score}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 20,
+                                fontSize: _responsive.uiFontSize,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            _responsive.scaledSizedBox(height: 4),
                             Text(
                               'Level: ${gameState.level}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: Colors.white70,
-                                fontSize: 16,
+                                fontSize: _responsive.smallFontSize,
                               ),
                             ),
                             Text(
                               'Weapon: ${gameState.player.currentWeapon.name}',
                               style: TextStyle(
                                 color: gameState.player.currentWeapon.color,
-                                fontSize: 14,
+                                fontSize: _responsive.smallFontSize,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
                             if (gameState.mode == GameMode.galacticRun &&
                                 gameState.currentModifier != null) ...[
-                              const SizedBox(height: 2),
+                              _responsive.scaledSizedBox(height: 2),
                               Text(
                                 'Modifier: ${gameState.currentModifier!.label}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: Colors.lightBlueAccent,
-                                  fontSize: 14,
+                                  fontSize: _responsive.smallFontSize,
                                 ),
                               ),
                             ],
                             if (gameState.hasCombo) ...[
-                              const SizedBox(height: 2),
+                              _responsive.scaledSizedBox(height: 2),
                               Text(
                                 'Combo x${gameState.comboMultiplier}',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: Colors.orangeAccent,
-                                  fontSize: 14,
+                                  fontSize: _responsive.smallFontSize,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],
                             if (gameState.difficultyMultiplier != 1.0) ...[
-                              const SizedBox(height: 2),
+                              _responsive.scaledSizedBox(height: 2),
                               Text(
                                 'Difficulty: ${(gameState.difficultyMultiplier * 100).round()}%',
                                 style: TextStyle(
                                   color: gameState.difficultyMultiplier > 1.0 
                                       ? Colors.redAccent 
                                       : Colors.greenAccent,
-                                  fontSize: 14,
+                                  fontSize: _responsive.smallFontSize,
                                 ),
                               ),
                             ],
                             if (hasBoss) ...[
-                              const SizedBox(height: 4),
+                              _responsive.scaledSizedBox(height: 4),
                               SizedBox(
-                                width: 160,
+                                width: _responsive.scaledSize(160),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
                                   child: LinearProgressIndicator(
@@ -983,7 +992,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                               children: List.generate(5, (index) {
                                 return Padding(
                                   padding:
-                                      const EdgeInsets.only(right: 4),
+                                      _responsive.scaledEdgeInsets(right: 4),
                                   child: Icon(
                                     index < gameState.player.lives
                                         ? Icons.favorite
@@ -991,22 +1000,22 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                                     color: index < gameState.player.lives
                                         ? Colors.red
                                         : Colors.grey,
-                                    size: 20,
+                                    size: _responsive.iconSize,
                                   ),
                                 );
                               }),
                             ),
-                            const SizedBox(height: 4),
+                            _responsive.scaledSizedBox(height: 4),
                             // Weapon energy bar
                             SizedBox(
-                              width: 100,
+                              width: _responsive.scaledSize(100),
                               child: Column(
                                 children: [
                                   Text(
                                     'Energy',
                                     style: TextStyle(
                                       color: Colors.white70,
-                                      fontSize: 10,
+                                      fontSize: _responsive.smallFontSize,
                                     ),
                                   ),
                                   Container(
@@ -1031,19 +1040,19 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            const Text(
+                            _responsive.scaledSizedBox(height: 8),
+                            Text(
                               'P: Pause | Q/E: Weapons',
                               style: TextStyle(
                                 color: Colors.white54,
-                                fontSize: 10,
+                                fontSize: _responsive.smallFontSize,
                               ),
                             ),
-                            const Text(
+                            Text(
                               '1-4: Abilities',
                               style: TextStyle(
                                 color: Colors.white54,
-                                fontSize: 10,
+                                fontSize: _responsive.smallFontSize,
                               ),
                             ),
                           ],
@@ -1052,15 +1061,15 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                     
                     // Weapon selection bar
-                    const SizedBox(height: 12),
+                    _responsive.scaledSizedBox(height: 12),
                     SizedBox(
-                      height: 60,
+                      height: _responsive.scaledSize(60),
                       child: Row(
                         children: gameState.availableWeapons.asMap().entries.map((entry) {
                           final index = entry.key;
                           final weapon = entry.value;
                           return Padding(
-                            padding: const EdgeInsets.only(right: 8),
+                            padding: _responsive.scaledEdgeInsets(right: 8),
                             child: WeaponWidget(
                               weapon: weapon,
                               isActive: index == gameState.currentWeaponIndex,
@@ -1072,13 +1081,13 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                     ),
                     
                     // Special abilities bar
-                    const SizedBox(height: 8),
+                    _responsive.scaledSizedBox(height: 8),
                     SizedBox(
-                      height: 60,
+                      height: _responsive.scaledSize(60),
                       child: Row(
                         children: gameState.player.specialAbilities.map((ability) {
                           return Padding(
-                            padding: const EdgeInsets.only(right: 8),
+                            padding: _responsive.scaledEdgeInsets(right: 8),
                             child: SpecialAbilityWidget(ability: ability),
                           );
                         }).toList(),

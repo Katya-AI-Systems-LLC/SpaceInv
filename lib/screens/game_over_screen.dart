@@ -11,6 +11,7 @@
  import '../models/game_mode.dart';
  import 'start_menu_screen.dart';
  import 'game_screen.dart';
+ import '../utils/responsive_helper.dart';
 
 class GameOverScreen extends StatefulWidget {
   final int score;
@@ -45,12 +46,20 @@ class _GameOverScreenState extends State<GameOverScreen> {
   final CurrencyService _currencyService = CurrencyService();
   int? _creditsEarned;
   int? _creditsTotal;
+  late ResponsiveHelper _responsive;
 
   @override
   void initState() {
     super.initState();
     _loadHighScore();
     _saveStatistics();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _responsive = ResponsiveHelper();
+    _responsive.initialize(context);
   }
 
   Future<void> _updateCredits() async {
@@ -172,7 +181,7 @@ class _GameOverScreenState extends State<GameOverScreen> {
                     : loc.t('title_game_over'),
                 style: TextStyle(
                   color: widget.isWin ? Colors.greenAccent : Colors.redAccent,
-                  fontSize: 56,
+                  fontSize: _responsive.titleFontSize,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 4,
                   shadows: [
@@ -183,11 +192,11 @@ class _GameOverScreenState extends State<GameOverScreen> {
                   ],
                 ),
               ),
-              SizedBox(height: 40),
+              _responsive.scaledSizedBox(height: 40),
               
               // Score
               Container(
-                padding: EdgeInsets.all(30),
+                padding: _responsive.screenPadding,
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(15),
@@ -197,44 +206,37 @@ class _GameOverScreenState extends State<GameOverScreen> {
                   children: [
                     if (isNewHighScore)
                       Container(
-                        padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-                        margin: EdgeInsets.only(bottom: 15),
+                        padding: _responsive.scaledEdgeInsets(horizontal: 15, vertical: 8),
+                        margin: _responsive.scaledEdgeInsets(bottom: 15),
                         decoration: BoxDecoration(
                           color: Colors.yellow,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.star, color: Colors.orange, size: 20),
-                            SizedBox(width: 8),
-                            Text(
-                              'NEW HIGH SCORE!',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
+                        child: Text(
+                          'NEW HIGH SCORE!',
+                          style: TextStyle(
+                            color: Colors.black,
+                            fontSize: _responsive.buttonFontSize,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     
                     _buildStatRow(loc.t('lbl_score'), widget.score.toString()),
-                    SizedBox(height: 10),
+                    _responsive.scaledSizedBox(height: 10),
                     _buildStatRow(loc.t('lbl_level'), widget.level.toString()),
                     if (highScore != null) ...[
-                      SizedBox(height: 10),
+                      _responsive.scaledSizedBox(height: 10),
                       _buildStatRow(loc.t('lbl_high_score'), '$highScore'),
                     ],
                     if (_creditsEarned != null && _creditsEarned! > 0) ...[
-                      SizedBox(height: 10),
+                      _responsive.scaledSizedBox(height: 10),
                       _buildStatRow(
                         loc.t('lbl_credits_earned'),
                         '+$_creditsEarned',
                       ),
                       if (_creditsTotal != null) ...[
-                        SizedBox(height: 6),
+                        _responsive.scaledSizedBox(height: 6),
                         _buildStatRow(
                           loc.t('lbl_credits_total'),
                           '$_creditsTotal',
@@ -242,9 +244,9 @@ class _GameOverScreenState extends State<GameOverScreen> {
                       ],
                     ],
                     if (_missionCompleted) ...[
-                      SizedBox(height: 10),
+                      _responsive.scaledSizedBox(height: 10),
                       Container(
-                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: _responsive.scaledEdgeInsets(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.greenAccent.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(12),
@@ -254,7 +256,7 @@ class _GameOverScreenState extends State<GameOverScreen> {
                           loc.t('campaign_mission_complete'),
                           style: TextStyle(
                             color: Colors.greenAccent,
-                            fontSize: 16,
+                            fontSize: _responsive.buttonFontSize,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -263,7 +265,7 @@ class _GameOverScreenState extends State<GameOverScreen> {
                   ],
                 ),
               ),
-              SizedBox(height: 40),
+              _responsive.scaledSizedBox(height: 40),
               
               // Buttons
               Row(
@@ -280,21 +282,21 @@ class _GameOverScreenState extends State<GameOverScreen> {
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
-                      padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                      padding: _responsive.buttonPadding,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25),
+                        borderRadius: BorderRadius.circular(_responsive.buttonBorderRadius),
                       ),
                     ),
                     child: Text(
                       loc.t('btn_play_again'),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: _responsive.buttonFontSize,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-                  SizedBox(width: 20),
+                  _responsive.scaledSizedBox(width: 20),
                   ElevatedButton(
                     onPressed: () {
                       Navigator.pushReplacement(
@@ -304,37 +306,36 @@ class _GameOverScreenState extends State<GameOverScreen> {
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.grey.shade700,
-                      padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                      padding: _responsive.buttonPadding,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(25),
+                        borderRadius: BorderRadius.circular(_responsive.buttonBorderRadius),
                       ),
                     ),
                     child: Text(
                       loc.t('btn_menu'),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 18,
+                        fontSize: _responsive.buttonFontSize,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                   if (_missionCompleted && _hasNextMission()) ...[
-                    SizedBox(width: 20),
+                    _responsive.scaledSizedBox(width: 20),
                     ElevatedButton(
                       onPressed: _startNextCampaignMission,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 24, vertical: 15),
+                        padding: _responsive.buttonPadding,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25),
+                          borderRadius: BorderRadius.circular(_responsive.buttonBorderRadius),
                         ),
                       ),
                       child: Text(
                         loc.t('btn_next_mission'),
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: _responsive.buttonFontSize,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -357,15 +358,15 @@ class _GameOverScreenState extends State<GameOverScreen> {
           '$label:',
           style: TextStyle(
             color: Colors.white70,
-            fontSize: 20,
+            fontSize: _responsive.uiFontSize,
           ),
         ),
-        SizedBox(width: 20),
+        _responsive.scaledSizedBox(width: 20),
         Text(
           value,
           style: TextStyle(
             color: Colors.white,
-            fontSize: 24,
+            fontSize: _responsive.titleFontSize,
             fontWeight: FontWeight.bold,
           ),
         ),
