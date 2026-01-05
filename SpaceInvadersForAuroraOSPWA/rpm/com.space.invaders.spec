@@ -15,7 +15,7 @@ BuildRequires:  pkgconfig(Qt5Quick)
 BuildRequires:  pkgconfig(Qt5Network)
 
 %description
-A modern Flutter implementation of the classic Space Invaders arcade game with comprehensive enhancements and advanced features.
+A modern Flutter implementation of the classic Space Invaders arcade.
 
 %prep
 %autosetup

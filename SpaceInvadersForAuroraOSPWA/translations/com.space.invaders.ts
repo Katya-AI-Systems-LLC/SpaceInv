@@ -16,7 +16,7 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;p&gt;Современная реализация классической аркадной игры Space Invaders на Flutter с существенными улучшениями и расширенными функциями.&lt;/p&gt;</source>
+        <source>&lt;p&gt;Современная реализация классической аркадной игры Space Invaders.&lt;/p&gt;</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

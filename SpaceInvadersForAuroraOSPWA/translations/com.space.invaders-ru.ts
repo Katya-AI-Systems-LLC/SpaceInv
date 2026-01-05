@@ -10,8 +10,8 @@
     </message>
     <message>
         <location filename="../qml/pages/AboutPage.qml" line="41"/>
-        <source>&lt;p&gt;A modern Flutter implementation of the classic Space Invaders arcade game with comprehensive enhancements and advanced features.&lt;/p&gt;</source>
-        <translation>&lt;p&gt;Современная реализация классической аркадной игры Space Invaders на Flutter с существенными улучшениями и расширенными функциями.&lt;/p&gt;</translation>
+        <source>&lt;p&gt;A modern Flutter implementation of the classic Space Invaders arcade.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;Современная реализация классической аркадной игры Space Invaders.&lt;/p&gt;</translation>
     </message>
     <message>
         <location filename="../qml/pages/AboutPage.qml" line="46"/>
