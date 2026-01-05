@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+X-Nemo-Application-Type=silica-qt5
+Icon=com.space.invaders
+Exec=/usr/bin/com.space.invaders
+Name=SpaceInvaders
+Name[ru]=SpaceInvaders
+
+[X-Application]
+Permissions=Audio;Camera;Documents;Downloads;Internet;Location;Microphone;Music;Pictures;PublicDir;PushNotifications;RemovableMedia;Videos;WebView
+OrganizationName=com.space
+ApplicationName=invaders
+
