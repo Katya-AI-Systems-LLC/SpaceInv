@@ -10,7 +10,7 @@
     </message>
     <message>
         <location filename="../qml/pages/AboutPage.qml" line="38"/>
-        <source>&lt;p&gt;Space Invaders Enhanced Edition transforms the classic arcade game into a modern, feature-rich space shooter with 50+ enhancements including advanced weapon systems, special abilities, environmental hazards, and dynamic difficulty scaling.&lt;/p&gt;</source>
+        <source>&lt;p&gt;Space Invaders Enhanced Edition transforms the classic arcade game into a modern.&lt;/p&gt;</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
