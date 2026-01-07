@@ -1,18 +1,148 @@
 # Privacy Policy
 
-**Last Updated:** January 7, 2026
+---
+
+## App & Developer Information
+
+| Item | Details |
+|------|---------|
+| **Application Name** | Space Invaders Enhanced Edition |
+| **Developer/Company** | Katya-AI-Systems-LLC |
+| **Privacy Policy URL** | https://raw.githubusercontent.com/Katya-AI-Systems-LLC/SpaceInv/refs/heads/main/PRIVACY_POLICY.md |
+| **Privacy Policy Effective Date** | January 7, 2026 |
+| **Last Updated** | January 7, 2026 |
+| **Developer Contact Email** | dmitry.justdev@gmail.com |
+| **Developer Website** | https://github.com/Katya-AI-Systems-LLC/SpaceInv |
+
+---
 
 ## 1. Introduction
 
-SpaceInv ("we," "us," "our," or "Company") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our game application available on multiple platforms including Android, iOS, Linux, macOS, Windows, and Web.
+Space Invaders Enhanced Edition ("we," "us," "our," or "Company"), developed and published by Katya-AI-Systems-LLC, is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our game application available on multiple platforms including Android, iOS, Linux, macOS, Windows, and Web.
 
 Please read this Privacy Policy carefully. If you do not agree with our policies and practices, please do not use our Service.
 
 ---
 
-## 2. Information We Collect
+## 1.1 Google Play Store Compliance Notice
 
-### 2.1 Information You Provide Directly
+This app is available on Google Play Store. By downloading and using this application from Google Play Store, you agree to this Privacy Policy. This policy is also available within the app settings under "Privacy Policy."
+
+**Data Collection Summary for Google Play:**
+- Account & profile information
+- Game progress and achievement data
+- Device identifiers and technical information
+- Usage analytics and crash reports
+- Location data (approximate, if enabled)
+- Payment information (processed by Google Play)
+
+**Data Sharing:**
+- Analytics providers (Firebase)
+- Payment processors (Google Play Billing)
+- Cloud service providers
+- Support services
+
+**User Control:**
+Users can control data permissions through:
+- Device settings
+- In-app privacy settings
+- Google Play privacy settings
+- Email opt-outs for marketing
+
+---
+
+## 2. Data Types & Safety (Google Play Data Safety Section)
+
+### 2.1 Personal Data Collected
+
+**Identifiers:**
+- User account credentials
+- Email address
+- Device identifiers
+- IP address
+- Firebase Analytics IDs
+
+**Commercial Information:**
+- In-app purchase history
+- Subscription information
+- Payment method information
+
+**Usage Information:**
+- App interactions and feature usage
+- Game performance metrics
+- Crash reports and diagnostics
+- Session duration and timestamps
+
+**Location Information:**
+- Approximate geolocation (if location services enabled)
+- IP-based location
+
+**Device Information:**
+- Device model and manufacturer
+- Operating system version
+- Device memory and storage
+- Unique identifiers (IMEI, IDFA, Android ID)
+- Mobile network information
+
+### 2.2 Data Security Practices
+
+**Encryption in Transit:**
+- All data transmissions use SSL/TLS encryption
+- Secure HTTPS connections required
+- Certificate pinning for API communications
+
+**Encryption at Rest:**
+- Database encryption
+- Secure cloud storage
+- Encrypted backup systems
+
+**Access Control:**
+- Role-based access restrictions
+- Minimal data access (need-to-know basis)
+- Secure authentication mechanisms
+- Regular access reviews
+
+**Security Testing:**
+- Regular security audits
+- Penetration testing
+- Vulnerability assessments
+- Code security reviews
+
+### 2.3 Data Retention & Deletion
+
+**User Data Deletion:**
+- Users can request data deletion via privacy@spaceinv.dev
+- Account deletion available in app settings
+- Data deleted within 30 days of request
+- Backup deletion within 90 days
+
+**Automatic Data Deletion:**
+- Crash reports: 30 days
+- Analytics data: 12 months (then aggregated)
+- Game progress: 2 years after last login
+- Transaction records: 7 years (legal requirement)
+
+**Data Portability:**
+- Export your game data in standard formats
+- Accessible through account settings
+- Available upon request
+
+### 2.4 Compliance with Google Play Requirements
+
+This app complies with Google Play's requirements including:
+- ✅ Valid privacy policy with developer/entity identification
+- ✅ Clear data collection and usage practices
+- ✅ User control over data and permissions
+- ✅ Secure data handling and transmission
+- ✅ Regular security updates and patches
+- ✅ Transparent data sharing practices
+- ✅ Response procedures for privacy inquiries
+
+---
+
+## 3. Information We Collect
+
+### 3.1 Information You Provide Directly
 
 **User Account Information:**
 - Username and password
@@ -32,7 +162,7 @@ Please read this Privacy Policy carefully. If you do not agree with our policies
 - Support tickets and inquiries
 - Chat or multiplayer communication logs
 
-### 2.2 Information Collected Automatically
+### 3.2 Information Collected Automatically
 
 **Device Information:**
 - Device type, model, and identifier
@@ -53,7 +183,7 @@ Please read this Privacy Policy carefully. If you do not agree with our policies
 - Application state at time of crash
 - Device diagnostics
 
-### 2.3 Information from Third Parties
+### 3.3 Information from Third Parties
 
 - Analytics providers (Firebase, Mixpanel, etc.)
 - Social media platforms (if you link accounts)
@@ -63,7 +193,7 @@ Please read this Privacy Policy carefully. If you do not agree with our policies
 
 ---
 
-## 3. How We Use Your Information
+## 4. How We Use Your Information
 
 We use the collected information for:
 
@@ -80,11 +210,11 @@ We use the collected information for:
 
 ---
 
-## 4. How We Share Your Information
+## 5. How We Share Your Information
 
 We may share your information with:
 
-### 4.1 Service Providers
+### 5.1 Service Providers
 Third-party vendors who assist us in operating our game, conducting analyses, and providing customer support:
 - Cloud infrastructure providers (AWS, Azure, Google Cloud)
 - Analytics services (Firebase, Google Analytics)
@@ -92,21 +222,21 @@ Third-party vendors who assist us in operating our game, conducting analyses, an
 - CDN providers
 - Email and communication services
 
-### 4.2 Business Transfers
+### 5.2 Business Transfers
 In the event of merger, acquisition, bankruptcy, or asset sale, your information may be transferred as part of that transaction.
 
-### 4.3 Legal Requirements
+### 5.3 Legal Requirements
 We may disclose information when required by law, court order, or governmental request, or to protect our legal rights.
 
-### 4.4 With Your Consent
+### 5.4 With Your Consent
 We share information when you explicitly consent to sharing with third parties.
 
-### 4.5 Aggregated Data
+### 5.5 Aggregated Data
 We may share anonymized, aggregated data that cannot identify you personally.
 
 ---
 
-## 5. Data Retention
+## 6. Data Retention
 
 - **Account Information:** Retained while your account is active, then deleted within 90 days of account deletion
 - **Game Progress:** Retained for 2 years after last login, then deleted
@@ -119,7 +249,7 @@ Certain information may be retained longer if required by law.
 
 ---
 
-## 6. Data Security
+## 7. Data Security
 
 We implement comprehensive security measures to protect your information:
 
@@ -135,9 +265,9 @@ However, no security system is impenetrable. We cannot guarantee absolute securi
 
 ---
 
-## 7. Your Privacy Rights
+## 8. Your Privacy Rights
 
-### 7.1 GDPR Rights (EU Users)
+### 8.1 GDPR Rights (EU Users)
 If you're in the European Union, you have the right to:
 - **Access:** Request a copy of your personal data
 - **Correction:** Correct inaccurate or incomplete data
@@ -147,7 +277,7 @@ If you're in the European Union, you have the right to:
 - **Object:** Object to data processing
 - **Withdraw Consent:** Withdraw consent for data processing
 
-### 7.2 CCPA Rights (California Users)
+### 8.2 CCPA Rights (California Users)
 California residents have the right to:
 - Know what personal information is collected
 - Know whether personal information is sold or disclosed
@@ -155,7 +285,7 @@ California residents have the right to:
 - Delete personal information
 - Correct inaccurate personal information
 
-### 7.3 LGPD Rights (Brazil Users)
+### 8.3 LGPD Rights (Brazil Users)
 Brazilian users have rights regarding:
 - Access to personal data
 - Correction of inaccurate data
@@ -163,12 +293,12 @@ Brazilian users have rights regarding:
 - Data portability
 - Access to data processing information
 
-### 7.4 Other Jurisdictions
+### 8.4 Other Jurisdictions
 We comply with applicable privacy laws in your jurisdiction.
 
 ---
 
-## 8. Exercising Your Rights
+## 9. Exercising Your Rights
 
 To exercise any of the above rights, please contact us at:
 
@@ -180,7 +310,7 @@ We will respond to verifiable requests within 30-45 days.
 
 ---
 
-## 9. Children's Privacy
+## 10. Children's Privacy
 
 Our game is not intentionally designed for children under 13. We do not knowingly collect personal information from children under 13. If we learn we have collected personal information from a child under 13, we will delete such information promptly.
 
@@ -190,7 +320,7 @@ For users aged 13-18, we provide additional privacy protections and may require 
 
 ---
 
-## 10. Third-Party Links and Services
+## 11. Third-Party Links and Services
 
 Our game may contain links to third-party websites and services not operated by us. This Privacy Policy does not apply to third-party services, and we are not responsible for their privacy practices. We encourage you to review their privacy policies before providing your information.
 
@@ -204,7 +334,7 @@ Our game may contain links to third-party websites and services not operated by 
 
 ---
 
-## 11. Cookies and Tracking Technologies
+## 12. Cookies and Tracking Technologies
 
 We use cookies, web beacons, and similar technologies to:
 - Store user preferences and login information
@@ -222,7 +352,7 @@ We use cookies, web beacons, and similar technologies to:
 
 ---
 
-## 12. Advertising and Marketing
+## 13. Advertising and Marketing
 
 We may use your information for:
 - Targeted advertising based on interests and behavior
@@ -238,7 +368,7 @@ We may use your information for:
 
 ---
 
-## 13. International Data Transfers
+## 14. International Data Transfers
 
 Your information may be transferred to, stored in, and processed in countries other than your country of residence. These countries may have data protection laws different from your home country.
 
@@ -250,7 +380,7 @@ By using our service, you consent to such transfers. We ensure adequate safeguar
 
 ---
 
-## 14. California Consumer Privacy Act (CCPA) Specifics
+## 15. California Consumer Privacy Act (CCPA) Specifics
 
 As a California resident, you have additional rights:
 
@@ -270,7 +400,7 @@ As a California resident, you have additional rights:
 
 ---
 
-## 15. Europe's GDPR Specifics
+## 16. Europe's GDPR Specifics
 
 **Legal Basis for Processing:**
 - Contractual necessity
@@ -285,7 +415,7 @@ As a California resident, you have additional rights:
 
 ---
 
-## 16. Brazil's LGPD Specifics
+## 17. Brazil's LGPD Specifics
 
 **Legal Basis for Processing:**
 - Consent
@@ -300,13 +430,13 @@ As a California resident, you have additional rights:
 
 ---
 
-## 17. Do Not Track Signals
+## 18. Do Not Track Signals
 
 Some browsers include a "Do Not Track" feature. Currently, there is no industry standard for recognizing DNT signals. We do not currently respond to DNT browser signals but respect your privacy choices through our settings.
 
 ---
 
-## 18. Changes to This Privacy Policy
+## 19. Changes to This Privacy Policy
 
 We may update this Privacy Policy periodically to reflect changes in our practices, technology, legal requirements, or other factors. We will notify you of material changes by:
 - Posting the updated policy on our website
@@ -318,7 +448,7 @@ Your continued use of the Service after changes constitutes your acceptance of t
 
 ---
 
-## 19. Contact Us
+## 20. Contact Us
 
 For privacy-related questions, concerns, or requests, please contact us:
 
@@ -336,18 +466,18 @@ SpaceInv Privacy Team
 
 ---
 
-## 20. Additional Information
+## 21. Additional Information
 
-### 20.1 Accountability
+### 21.1 Accountability
 We maintain records of data processing activities and are committed to demonstrating compliance with privacy regulations.
 
-### 20.2 Data Protection Impact Assessments
+### 21.2 Data Protection Impact Assessments
 We conduct DPIAs for high-risk processing activities.
 
-### 20.3 Vendor Management
+### 21.3 Vendor Management
 All third-party vendors are contractually obligated to protect your data with equivalent security measures.
 
-### 20.4 Incident Response
+### 21.4 Incident Response
 In case of a data breach affecting personal information, we will:
 1. Investigate the breach
 2. Notify affected individuals within 72 hours (where required)
